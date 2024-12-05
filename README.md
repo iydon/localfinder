@@ -185,7 +185,7 @@ git clone git@github.com:astudentfromsustech/localfinder.git
 Run the localfinder/tests/scripts/download_test_data.sh to download the test data
 ```bash
 cd ./localfinder/tests/scripts
-bash .download_test_data.sh
+bash ./download_test_data.sh
 ```
 
 Next, we will run all the subcommands on the test data   
