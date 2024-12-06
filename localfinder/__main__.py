@@ -24,7 +24,7 @@ def main():
     # Create the top-level parser
     parser = argparse.ArgumentParser(
         prog='localfinder',
-        description='localfinder: A tool for finding significantly different genomic regions using local correlation and enrichment significance. (GitHub: https://github.com/astudentfromsustech/localfinder)'
+        description='localfinder: A tool calculating local correlation and enrichment significance of two tracks and finding significantly different genomic regions. (GitHub: https://github.com/astudentfromsustech/localfinder)'
     )
     parser.add_argument('--version', '-V', action='version',
                         version=f'localfinder {version}',
@@ -151,7 +151,7 @@ def main():
                 localfinder viz --input_files track1.bedgraph track2.bedgraph --output_file output.html --method plotly --region chr1 1000000 2000000 --colors blue red
 
             Usage Example 2:
-                localfinder viz --input_files track1.bedgraph track2.bedgraph --output_file output.png --method pyGenomeTracks --region chr1 1000000 2000000 --colors blue red
+                localfinder viz --input_files track1.bedgraph track2.bedgraph --output_file output.png --method pyGenomeTracks --region chr1 1000000 2000000 --colors
             '''),
         formatter_class=RawDescriptionHelpFormatter  # Preserve formatting
     )

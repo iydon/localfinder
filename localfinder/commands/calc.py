@@ -1,5 +1,6 @@
 # File: commands/calc.py
 
+import sys
 import json
 import os
 import pandas as pd
@@ -45,8 +46,8 @@ def main(args):
     # Merge the dataframes
     df = pd.merge(df1, df2, on=['chr', 'start', 'end'], how='inner')
 
-    # Remove bins with zero counts in both tracks
-    df = df[(df['readNum_1'] > 0) | (df['readNum_2'] > 0)]
+    # # Remove bins with zero counts in both tracks
+    # df = df[(df['readNum_1'] > 0) | (df['readNum_2'] > 0)]
 
     # Parse method_params if it's a string
     if isinstance(method_params, str):
