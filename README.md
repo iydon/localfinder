@@ -1,6 +1,6 @@
 # localfinder
 
-A tool calculating local correlation and enrichment significance of two tracks and finding significantly different genomic regions.
+A tool calculating weighted local correlation and enrichment significance of two tracks and finding significantly different genomic regions.
 
 ## Installation Requirements
 
@@ -176,7 +176,7 @@ conda activate  localfinder
 Install external tools and localfinder
 ```bash
 conda install -c conda-forge -c bioconda samtools bedtools ucsc-bigwigtobedgraph
-pip install LocalFinder
+pip install localfinder
 ```
 
 Download the souce code of [localfinder](https://github.com/astudentfromsustech/localfinder)  
