@@ -38,23 +38,23 @@ localfinder -h
 ```bash
 localfinder bin -h
 ```
-    usage: localfinder bin [-h] --input_files INPUT_FILES [INPUT_FILES ...] --output_dir OUTPUT_DIR [--bin_size BIN_SIZE] --chrom_sizes CHROM_SIZES [--chroms CHROMS [CHROMS ...]]
+    usage: localfinder bin [-h] --input_files INPUT_FILES [INPUT_FILES ...] --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES [--bin_size BIN_SIZE] [--chroms CHROMS [CHROMS ...]]
     
     Bin genomic tracks into fixed-size bins and output BedGraph format.
     
     options:  
       -h, --help                                        `Show this help message and exit`  
       --input_files INPUT_FILES [INPUT_FILES ...]       `Input files in BigWig/BedGraph/BAM/SAM format`    
-      --output_dir OUTPUT_DIR                           `Output directory for binned data`  
+      --output_dir OUTPUT_DIR                           `Output directory`
+      --chrom_sizes CHROM_SIZES                         `Path to the chromosome sizes file`   
       --bin_size BIN_SIZE                               `Size of each bin (default: 200)`  
-      --chrom_sizes CHROM_SIZES                         `Path to the chromosome sizes file`  
       --chroms CHROMS [CHROMS ...]                      `Chromosomes to process (e.g., chr1 chr2). Defaults to "all"`
     
     Usage Example 1:
-        localfinder bin --input_files track1.bw track2.bw --output_dir ./binned_tracks --bin_size 200 --chrom_sizes hg19.chrom.sizes --chroms chr1 chr2
+        localfinder bin --input_files track1.bw track2.bw --output_dir ./bin_out --chrom_sizes hg19.chrom.sizes --bin_size 200 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder bin --input_files track1.bigwig track2.bigwig --output_dir ./binned_tracks --bin_size 200 --chrom_sizes hg19.chrom.sizes --chroms all
+        localfinder bin --input_files track1.bigwig track2.bigwig --output_dir ./bin_out --chrom_sizes hg19.chrom.sizes --bin_size 200 --chroms all
 
 
 ### calc
@@ -62,33 +62,36 @@ localfinder bin -h
 localfinder calc -h
 ```
 
-    usage: localfinder calc [-h] --track1 TRACK1 --track2 TRACK2 [--method {locP_and_ES,locWP_and_ES,locS_and_ES,locWS_and_ES,locMI_and_ES}] [--method_params METHOD_PARAMS] [--bin_num BIN_NUM] [--step STEP] --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES [--chroms CHROMS [CHROMS ...]]
+    usage: localfinder calc [-h] --track1 TRACK1 --track2 TRACK2 --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES --method {locP_and_ES,locS_and_ES} [--bin_size BIN_SIZE] [--binNum_window BIN_NUM_WINDOW]  [--step STEP] [--binNum_peak BIN_NUM_PEAK] [--FC_thresh FC_THRESH] [--percentile PERCENTILE]  [--chroms CHROMS [CHROMS ...]]
     
     Calculate local correlation and enrichment significance between two BedGraph tracks.
     
     options:  
     -h, --help                                          `Show this help message and exit`  
     --track1 TRACK1                                     `First input BedGraph file`  
-    --track2 TRACK2                                     `Second input BedGraph file`  
-    --method {locP_and_ES,locWP_and_ES, etc.}           `Methods for calculate local correlation and enrichment significance (default: locP_and_ES)`  
-    --method_params METHOD_PARAMS                       `Parameters for the method in JSON format (default: {"percentile": 5})`  
-    --bin_num BIN_NUM                                   `Number of bins in the sliding window (default: 11)`  
+    --track2 TRACK2                                     `Second input BedGraph file` 
+    --output_dir OUTPUT_DIR                             `Output directory` 
+    --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`
+    --method {locP_and_ES,locP_and_ES}                  `Methods for calculate weighted local correlation and enrichment significance (default: locP_and_ES). P: pearson correlation; S: spearman correlation`   
+    --bin_size BIN_SIZE                                 `Size of each bin (default: 200)` 
+    --binNum_window BIN_NUM_WINDOW                      `Number of bins in the sliding window (default: 11)`  
     --step STEP                                         `Step size for the sliding window (default: 1)`  
-    --output_dir OUTPUT_DIR                             `Output directory for results`  
-    --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`  
+    --binNum_peak BIN_NUM_PEAK                          `Number of bins of the peak for ES (default: 11). When the peak is around 400bp and the bin_size=200bp, binNum_peak=2 is recommended`  
+    --FC_thresh FC_THRESH                               `Fold-change threshold used as log base in enrichment (default: 1.5). When FC_thresh=1.5, the null hypothesis is that log1.5(track1/track2)=0, which is quite similar to the FC_thresh in the vocalno plot. Wald, a statistical value following a normal distribution here, euqal to log1.5(track1/track2) / SE can be used to calculate the p value, whose -log10 represents for ES here`
+    --percentile PERCENTILE                             `Percentile for floor correction of low-coverage bins (default: 5). High percentile such as 90 or 95 is recommended, when tracks mainly contains some high sharp peaks, while small percentile like 5 is recommended when tracks mainly contain broad and relatively low peaks`   
     --chroms CHROMS [CHROMS ...]                        `Chromosomes to process (e.g., chr1 chr2). Defaults to "all"`
     
     Usage Example 1:
-        localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --method locP_and_ES --method_params '{"percentile": 5}' --bin_num 11 --step 1 --output_dir ./results --chrom_sizes hg19.chrom.sizes --chroms chr1 chr2
+        localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --output_dir ./calc_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES  --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --method locP_and_ES --method_params '{"percentile": 5}' --bin_num 11 --step 1 --output_dir ./results --chrom_sizes hg19.chrom.sizes --chroms all  
+        localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --output_dir ./calc_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES  --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5 --chroms all
 
 ### findreg
 ```bash
 localfinder findreg -h
 ```
-    usage: localfinder findreg [-h] --track_E TRACK_E --track_C TRACK_C --output_dir OUTPUT_DIR [--min_regionSize MIN_REGIONSIZE] [--E_upPercentile E_UPPERCENTILE] [--E_lowPercentile E_LOWPERCENTILE] [--C_upPercentile C_UPPERCENTILE] [--C_lowPercentile C_LOWPERCENTILE] [--chroms CHROMS [CHROMS ...]] --chrom_sizes CHROM_SIZES
+    usage: localfinder findreg [-h] --track_E TRACK_E --track_C TRACK_C --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES [--p_thresh P_THRESH] [--min_regionSize MIN_REGIONSIZE] [--chroms CHROMS [CHROMS ...]]
     
     Identify genomic regions that show significant differences in correlation and enrichment.
     
@@ -96,51 +99,49 @@ localfinder findreg -h
     -h, --help                                          `show this help message and exit`  
     --track_E TRACK_E                                   `Enrichment Significance BedGraph file`  
     --track_C TRACK_C                                   `Local Correlation BedGraph file`  
-    --output_dir OUTPUT_DIR                             `Output directory for significant regions`  
-    --min_regionSize MIN_REGIONSIZE                     `Minimum number of consecutive bins to define a region (default: 5)`  
-    --E_upPercentile E_UPPERCENTILE                     `High percentile for enrichment (default: 75)`  
-    --E_lowPercentile E_LOWPERCENTILE                   `Low percentile for enrichment (default: 25)`  
-    --C_upPercentile C_UPPERCENTILE                     `High percentile for correlation (default: 75)`  
-    --C_lowPercentile C_LOWPERCENTILE                   `Low percentile for correlation (default: 25)`  
+    --output_dir OUTPUT_DIR                             `Output directory for significant regions` 
+    --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file` 
+    --p_thresh P_THRESH                                 `P-value threshold (default: 0.05)`  
+    --binNum_thresh BINNUM_THRESH                       `Min consecutive significant bins per region (default: 2)`    
     --chroms CHROMS [CHROMS ...]                        `Chromosomes to process (e.g., chr1 chr2). Defaults to "all"`  
-    --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`
+
     
     Usage Example 1:
-        localfinder findreg --track_E track_E.bedgraph --track_C track_C.bedgraph --output_dir ./results --min_regionSize 5 --E_upPercentile 75 --E_lowPercentile 25 --C_upPercentile 75 --C_lowPercentile 25 --chrom_sizes hg19.chrom.sizes --chroms chr1 chr2
+        localfinder findreg --track_E track_ES.bedgraph --track_C track_hmwC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder findreg --track_E track_E.bedgraph --track_C track_C.bedgraph --output_dir ./results --min_regionSize 5 --E_upPercentile 75 --E_lowPercentile 25 --C_upPercentile 75 --C_lowPercentile 25 --chrom_sizes hg19.chrom.sizes --chroms all
+        localfinder findreg --track_E track_ES.bedgraph --track_C track_hmwC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes --p_thresh 0.05 --binNum_thresh 2 --chroms all
 
 ### pipeline
 ```bash
 localfinder pipeline -h
 ```
-    usage: localfinder pipeline [-h] --input_files INPUT_FILES [INPUT_FILES ...] [--output_dir OUTPUT_DIR] --chrom_sizes CHROM_SIZES [--bin_size BIN_SIZE] [--method {locP_and_ES,locWP_and_ES,locS_and_ES,locWS_and_ES,locMI_and_ES}] [--method_params METHOD_PARAMS] [--bin_num BIN_NUM] [--step STEP] [--E_upPercentile E_UPPERCENTILE] [--E_lowPercentile E_LOWPERCENTILE] [--C_upPercentile C_UPPERCENTILE] [--C_lowPercentile C_LOWPERCENTILE] [--chroms CHROMS [CHROMS ...]] [--min_regionSize MIN_REGIONSIZE]
+    usage: localfinder pipeline [-h] --input_files INPUT_FILES [INPUT_FILES ...] --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES --method {locP_and_ES,locS_and_ES} [--bin_size BIN_SIZE] [--binNum_window BIN_NUM_WINDOW] [--step STEP] [--binNum_peak BIN_NUM_PEAK] [--FC_thresh FC_THRESH] [--percentile PERCENTILE] [--binNum_thresh BINNUM_THRESH] [--chroms CHROMS [CHROMS ...]]
     
     Run all steps of the localfinder pipeline sequentially.
     
     options:  
     -h, --help                                          `Show this help message and exit`  
     --input_files INPUT_FILES [INPUT_FILES ...]         `Input BigWig files to process`  
-    --output_dir OUTPUT_DIR                             `Output directory for all results (default: ./output_pipeline)`  
-    --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`  
-    --bin_size BIN_SIZE                                 `Size of each bin for binning tracks (default: 200bp)`  
-    --method {locP_and_ES,locWP_and_ES, etc.}           `Method for calculate local correlation and enrichment significance (default: locP_and_ES)`  
-    --method_params METHOD_PARAMS                       `Method-specific parameters in JSON format`  
-    --bin_num BIN_NUM                                   `Number of bins in the sliding window (default: 11)`  
-    --step STEP                                         `Step size for sliding window (default: 1)`  
-    --E_upPercentile E_UPPERCENTILE                     `Percentile threshold for high enrichment (default: 75)`  
-    --E_lowPercentile E_LOWPERCENTILE                   `Percentile threshold for low enrichment (default: 25)`  
-    --C_upPercentile C_UPPERCENTILE                     `Percentile threshold for high correlation (default: 75)`  
-    --C_lowPercentile C_LOWPERCENTILE                   `Percentile threshold for low correlation (default: 25)`  
+    --output_dir OUTPUT_DIR                             `Output directory for all results`  
+    --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`   
+    --method {locP_and_ES,locS_and_ES}                  `Method for calculate local correlation and enrichment significance (default: locP_and_ES)`  
+    --bin_size BIN_SIZE                                 `Size of each bin for binning tracks (default: 200bp)` 
+    --binNum_window BIN_NUM_WINDOW                      `Number of bins in the sliding window (default: 11)`  
+    --step STEP                                         `Step size for the sliding window (default: 1)`  
+    --binNum_peak BIN_NUM_PEAK                          `Number of bins of the peak for ES (default: 11). When the peak is around 400bp and the bin_size=200bp, binNum_peak=2 is recommended`  
+    --FC_thresh FC_THRESH                               `Fold-change threshold used as log base in enrichment (default: 1.5). When FC_thresh=1.5, the null hypothesis is that log1.5(track1/track2)=0, which is quite similar to the FC_thresh in the vocalno plot. Wald, a statistical value following a normal distribution here, euqal to log1.5(track1/track2) / SE can be used to calculate the p value, whose -log10 represents for ES here`
+    --percentile PERCENTILE                             `Percentile for floor correction of low-coverage bins (default: 5). High percentile such as 90 or 95 is recommended, when tracks mainly contains some high sharp peaks, while small percentile like 5 is recommended when tracks mainly contain broad and relatively low peaks`
+    --p_thresh P_THRESH                                 `P-value threshold (default: 0.05)`
+    --binNum_thresh BINNUM_THRESH                       `Min consecutive significant bins per region (default: 2)` 
     --chroms CHROMS [CHROMS ...]                        `Chromosomes to process (e.g., chr1 chr2). Defaults to "all"`  
-    --min_regionSize MIN_REGIONSIZE                     `Minimum number of consecutive bins to define a region (default: 5)`
+
     
     Usage Example 1:
-        localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ./results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --bin_num 11 --step 1 --E_upPercentile 75 --E_lowPercentile 25 --C_upPercentile 75 --C_lowPercentile 25 --chroms chr1 chr2
+        localfinder pipeline --input_files track1.bedgraph track2.bedgraph --output_dir ./pipeline_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 5 --FC_thresh 1.5 --percentile 5 --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ./results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --bin_num 11 --step 1 --E_upPercentile 75 --E_lowPercentile 25 --C_upPercentile 75 --C_lowPercentile 25 --chroms all
+        localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ./pipeline_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 5 --FC_thresh 1.5 --percentile 5 --p_thresh 0.05 --binNum_thresh 2 --chroms all
 
 ### viz
 ```bash
@@ -173,7 +174,7 @@ conda activate  localfinder
 
 Install external tools and localfinder
 ```bash
-conda install -c bioconda -c conda-forge samtools bedtools ucsc-bigwigtobedgraph
+conda install -c conda-forge -c bioconda samtools bedtools ucsc-bigwigtobedgraph
 pip install LocalFinder
 ```
 
@@ -182,39 +183,4 @@ Download the souce code of [localfinder](https://github.com/astudentfromsustech/
 git clone git@github.com:astudentfromsustech/localfinder.git
 ```
 
-Run the localfinder/tests/scripts/download_test_data.sh to download the test data
-```bash
-cd ./localfinder/tests/scripts
-bash ./download_test_data.sh
-```
-
-Next, we will run all the subcommands on the test data   
-1. bin (bin_tracks) 
-```bash
-localfinder bin -h 
-localfinder bin --input_files ./tests/data/E071-H3K4me1.pval.signal.bigwig ./tests/data/E100-H3K4me1.pval.signal.bigwig --output_dir ./tests/binned_tracks --chrom_sizes ./tests/annotations/hg19.chrom.sizes --chroms chr20 chr19
-```
-
-2. localfinder calc (calc_locCor_and_ES) 
-```bash
-localfinder calc -h 
-localfinder calc --track1 ./tests/binned_tracks/E071-H3K4me1.pval.signal.binSize200.bedgraph --track2 ./tests/binned_tracks/E100-H3K4me1.pval.signal.binSize200.bedgraph --method locP_and_ES --output_dir ./tests/calc --chrom_sizes ./tests/annotations/hg19.chrom.sizes --chroms chr20 chr19
-```
-
-3. localfinder findreg (find_SDR)
-```bash
-localfinder findreg -h
-localfinder findreg --track_E ./tests/calc/track_ES.bedgraph --track_C ./tests/calc/track_locCor.bedgraph --output_dir ./tests/findreg --chrom_sizes ./tests/annotations/hg19.chrom.sizes --chroms chr19 chr20
-```
-
-4. localfinder pipeline
-```bash
-localfinder pipeline -h 
-localfinder pipeline --input_files ./tests/data/E071-H3K4me1.pval.signal.bigwig ./tests/data/E100-H3K4me1.pval.signal.bigwig --output_dir ./tests/pipeline --chrom_sizes ./tests/annotations/hg19.chrom.sizes --chroms chr20 chr19
-```
-
-5. localfinder viz (visualize_tracks)
-```bash
-localfinder viz -h
-localfinder viz --input_files ./tests/binned_tracks/E071-H3K4me1.pval.signal.binSize200.bedgraph ./tests/binned_tracks/E100-H3K4me1.pval.signal.binSize200.bedgraph ./tests/calc/track_locCor.bedgraph ./tests/calc/track_ES.bedgraph --output_file ./tests/viz/test.html --method plotly --region chr20 1000000 2000000
-```
+Run the examples under localfinder/tests/ (scripts have been preprared in tests folder)  

@@ -1,15 +1,8 @@
 # File: commands/calc.py
 
-import sys
-import json
-import os
-import pandas as pd
+import os, sys, pandas as pd
 from localfinder.utils import (
-    localPearson_and_enrichmentSignificance,
-    localWeightedPearson_and_enrichmentSignificance,
-    localSpearman_and_enrichmentSignificance,
-    localWeightedSpearman_and_enrichmentSignificance,
-    localMI_and_enrichmentSignificance,
+    locCor_and_ES,
     get_chromosomes_from_chrom_sizes
 )
 
@@ -18,8 +11,10 @@ def main(args):
     track2_file = args.track2
     output_dir = args.output_dir
     method = args.method
-    method_params = args.method_params
-    bin_number_of_window = args.bin_num
+    percentile = args.percentile
+    bin_number_of_window = args.binNum_window
+    bin_number_of_peak = args.binNum_peak
+    FC_thresh = args.FC_thresh
     step = args.step
     chroms = args.chroms
     chrom_sizes = args.chrom_sizes  # **Assuming chrom_sizes is now passed to calc.py**
@@ -46,68 +41,25 @@ def main(args):
     # Merge the dataframes
     df = pd.merge(df1, df2, on=['chr', 'start', 'end'], how='inner')
 
-    # # Remove bins with zero counts in both tracks
-    # df = df[(df['readNum_1'] > 0) | (df['readNum_2'] > 0)]
 
-    # Parse method_params if it's a string
-    if isinstance(method_params, str):
-        try:
-            method_params = json.loads(method_params)
-        except json.JSONDecodeError as e:
-            print(f"Error parsing method_params JSON: {e}")
-            sys.exit(1)
-
-    # Call the selected method based on the alias
+    # decide which correlation to use
     if method == 'locP_and_ES':
-        localPearson_and_enrichmentSignificance(
-            df,
-            bin_number_of_window=bin_number_of_window,
-            step=step,
-            output_dir=output_dir,
-            chroms=chroms,
-            chrom_sizes=chrom_sizes,
-            **method_params
-        )
-    elif method == 'locWP_and_ES':
-        localWeightedPearson_and_enrichmentSignificance(
-            df,
-            bin_number_of_window=bin_number_of_window,
-            step=step,
-            output_dir=output_dir,
-            chroms=chroms,
-            chrom_sizes=chrom_sizes,
-            **method_params
-        )
+        corr_method = 'pearson'
     elif method == 'locS_and_ES':
-        localSpearman_and_enrichmentSignificance(
-            df,
-            bin_number_of_window=bin_number_of_window,
-            step=step,
-            output_dir=output_dir,
-            chroms=chroms,
-            chrom_sizes=chrom_sizes,
-            **method_params
-        )
-    elif method == 'locWS_and_ES':
-        localWeightedSpearman_and_enrichmentSignificance(
-            df,
-            bin_number_of_window=bin_number_of_window,
-            step=step,
-            output_dir=output_dir,
-            chroms=chroms,
-            chrom_sizes=chrom_sizes,
-            **method_params
-        )
-    elif method == 'locMI_and_ES':
-        localMI_and_enrichmentSignificance(
-            df,
-            bin_number_of_window=bin_number_of_window,
-            step=step,
-            output_dir=output_dir,
-            chroms=chroms,
-            chrom_sizes=chrom_sizes,
-            **method_params
-        )
+        corr_method = 'spearman'
     else:
         print(f"Unsupported method: {method}")
         sys.exit(1)
+
+        # ── RUN the analysis ──────────────────────────────────────────────────────
+    locCor_and_ES(
+        df,
+        bin_number_of_window = bin_number_of_window,
+        step                 = step,
+        percentile           = percentile,
+        FC_thresh            = FC_thresh,
+        bin_number_of_peak   = bin_number_of_peak,
+        corr_method          = corr_method,
+        output_dir           = output_dir,
+        chroms               = chroms
+    )

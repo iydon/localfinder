@@ -1,21 +1,11 @@
 # File: utils.py
-import argparse
-import numpy as np
-import os
-import pandas as pd
-import shutil
-import subprocess
-import sys
-import tempfile
+import tempfile, shutil, subprocess, sys, os, numpy as np, pandas as pd
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from scipy.stats import pearsonr, norm, spearmanr
-from scipy.special import digamma
-from sklearn.feature_selection import mutual_info_regression
-from sklearn.neighbors import NearestNeighbors
 
 
 def check_external_tools():
@@ -226,787 +216,168 @@ def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chroms=
 
 
 
-def localPearson_and_enrichmentSignificance(df, column1='readNum_1', column2='readNum_2', bin_number_of_window=11, step=1,
-                                output_dir='output', chroms=None, **method_params):
+def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
+        bin_number_of_window=11, step=1, percentile=5, FC_thresh=1.5,
+        bin_number_of_peak=11, corr_method='pearson',
+        output_dir='output', chroms=None):
+
     """
-    Method to calculate local Pearson correlation and enrichment.
-    This function processes the DataFrame and saves the output directly.
-
-    Parameters:
-    - df (pd.DataFrame): DataFrame containing the merged tracks with columns 'chr', 'start', 'end', column1, column2.
-    - column1 (str): Column name for track1 data in the DataFrame (default is 'readNum_1').
-    - column2 (str): Column name for track2 data in the DataFrame (default is 'readNum_2').
-    - bin_number_of_window (int): Number of bins in the sliding window. Default is 11.
-    - step (int): Step size for the sliding window. Default is 1.
-    - output_dir (str): Directory to save the output files. Default is 'output'.
-    - chroms (list): List of chromosomes to process. If None, all chromosomes are processed.
-    - **method_params: Additional method-specific parameters (e.g., 'percentile').
-
-    Outputs:
-    - Saves 'track_locCor.bedgraph' and 'track_ES.bedgraph' in the output directory.
+    Calculate weighted local correlation and enrichment significance.
+    Writes two bedgraph files: track_hmwC.bedgraph, track_ES.bedgraph.
     """
-    print("Using localPearson_and_enrichmentSignificance (locP_and_ES)")
-    # Extract method-specific parameters
-    percentile = method_params.get('percentile', 5)  # Default percentile is 5
 
-    # Ensure the output directory exists
+    print(f"calculate weighted local correlation and enrichment significance "
+          f"(corr_method={corr_method})")
+    print(f"parameters: percentile={percentile}, FC_thresh={FC_thresh}, "
+          f"bin_number_of_window={bin_number_of_window}, "
+          f"bin_number_of_peak={bin_number_of_peak}")
+    EPS = 1e-9
     os.makedirs(output_dir, exist_ok=True)
 
-    # Define the output file paths
-    output_pearson_file = os.path.join(output_dir, 'track_locCor.bedgraph')
-    output_wald_pvalue_file = os.path.join(output_dir, 'track_ES.bedgraph')
+    # ---------- 1  global normalisation ---------------------------------
+    print("step1: global normalisation")
+    cov1, cov2 = df[column1].sum(), df[column2].sum()
+    if cov1 and cov2:
+        if cov1 > cov2:
+            df[column1] *= cov2 / cov1
+            print(f"Scaled {column1} down to match {column2}")
+        else:
+            df[column2] *= cov1 / cov2
+            print(f"Scaled {column2} down to match {column1}")
 
-    # Initialize the final DataFrame
+    # ---------- output paths -------------------------------------------
+    out_ES   = os.path.join(output_dir, 'track_ES.bedgraph')
+    out_hmwC = os.path.join(output_dir, 'track_hmwC.bedgraph')
+
+    half_w = (bin_number_of_window - 1) // 2
+    half_p = (bin_number_of_peak   - 1) // 2
+    chromosomes = chroms if chroms else df['chr'].unique()
+
     df_final = pd.DataFrame()
 
-    # Process specified chromosomes or all chromosomes
-    if chroms:
-        chromosomes = chroms
-    else:
-        chromosomes = df['chr'].unique()
-
+    # ===================================================================
+    # per-chromosome processing
+    # ===================================================================
+    print("step2: calculate weighted correlation and ES per chromosome")
     for chrom in chromosomes:
-        df_chr = df[df['chr'] == chrom].reset_index(drop=True)
-        n = df_chr.shape[0]
+        df_raw = df[df['chr'] == chrom].reset_index(drop=True)           # raw (no floor)
+        n = len(df_raw)
         if n == 0:
-            print(f"No data found for chromosome {chrom}")
+            print(f"No data for {chrom}, skipping")
             continue
-        print(f"Processing {chrom} with {n} bins")
 
-        # Replace values below the specified percentile within the chromosome
-        all_values_chr = pd.concat([df_chr[column1], df_chr[column2]])
-        non_zero_values_chr = all_values_chr[all_values_chr > 0]
-        if len(non_zero_values_chr) == 0:
-            percentile_value_chr = 0
-        else:
-            percentile_value_chr = np.percentile(non_zero_values_chr, percentile)
-        print(f"{chrom} Percentile value: {percentile_value_chr}")
+        print(f"\nProcessing {chrom}: {n} bins")
+        print(f"  half_window = {half_w}, half_peak = {half_p}")
+
+        # 2·1  percentile floor (only for ES)
+        all_vals = pd.concat([df_raw[column1], df_raw[column2]])
+        nz = all_vals[all_vals > 0]
+        pct = np.percentile(nz, percentile) if len(nz) else 0
+        print(f"  {percentile}th percentile in non-zero bins = {pct:.4f}")
+
+        df_floor = df_raw.copy()                                         ### floor
+        mask = (df_floor[column1] <= pct) & (df_floor[column2] <= pct)
+        df_floor.loc[mask, [column1, column2]] = pct 
+        df_floor[column1] = df_floor[column1].astype('float64')
+        df_floor[column2] = df_floor[column2].astype('float64')
+
+        # 2·2  sliding-window statistics  (use *raw* data!)
+        corr    = np.zeros(n)
+        m_corr = np.zeros(n)
+        hmw = np.zeros(n)
+
+        m1_raw  = np.zeros(n); m2_raw  = np.zeros(n)    ### <<< CHANGED
+
+        # floored parameters for logFC in peak region
+        mES1_fl = np.zeros(n); mES2_fl = np.zeros(n)
+        # floored parameters for SE in window region
+        m1_fl = np.zeros(n);  m2_fl = np.zeros(n)                   ### <<< CHANGED
+        v1_fl = np.zeros(n);  v2_fl = np.zeros(n)                   ### <<< CHANGED
+        d1_fl = np.zeros(n);  d2_fl = np.zeros(n)                   ### <<< CHANGED
+
+        print(f"Step2.2: calculate weighted local correlation ({corr_method})"
+              f" and ES (window={bin_number_of_window}, step={step})")
+        for i in range(half_w, n-half_w, step):
+            # ---------- correlation window ----------  (RAW)  ###
+            w1 = df_raw[column1].iloc[i-half_w : i+half_w+1]            ### <<< CHANGED (no-floor)
+            w2 = df_raw[column2].iloc[i-half_w : i+half_w+1]            ### <<< CHANGED (no-floor)
+
+            if len(set(w1)) > 1 and len(set(w2)) > 1:
+                if corr_method == 'pearson':
+                    r, _ = pearsonr(w1, w2)
+                    corr[i] = max(r, 0)
+                elif corr_method == 'spearman':
+                    r, _ = spearmanr(w1, w2)
+                    corr[i] = max(r, 0)
+                else:
+                    raise ValueError(f"Unknown corr_method: {corr_method}")
+
+            m1_raw[i], m2_raw[i] = w1.mean(), w2.mean()
+            hmw[i]  = (m1_raw[i]*m2_raw[i])/(m1_raw[i]+m2_raw[i]+EPS)
+
+            # SE in window
+            wf1 = df_floor[column1].iloc[i-half_w : i+half_w+1]
+            wf2 = df_floor[column2].iloc[i-half_w : i+half_w+1]
+
+            m1_fl[i], m2_fl[i] = wf1.mean(), wf2.mean()               ### <<< CHANGED
+            v1_fl[i], v2_fl[i] = wf1.var(ddof=0), wf2.var(ddof=0)     ### <<< CHANGED
+            d1_fl[i] = max((v1_fl[i] - m1_fl[i])/(m1_fl[i]**2 + EPS), 0)  ### <<< CHANGED
+            d2_fl[i] = max((v2_fl[i] - m2_fl[i])/(m2_fl[i]**2 + EPS), 0)  ### <<< CHANGED
+          
+
+            # ---------- logFC in peak region ----------  (FLOORED)  ###
+            p1 = df_floor[column1].iloc[i-half_p : i+half_p+1]          ### <<< CHANGED (no-floor)
+            p2 = df_floor[column2].iloc[i-half_p : i+half_p+1]          ### <<< CHANGED (no-floor)
+            mES1_fl[i], mES2_fl[i] = p1.mean(), p2.mean()
+
+        # 2·3  calculate mean correlation
+        for i in range(half_w, n-half_w, step):
+            local_c = corr[i-half_w : i+half_w+1]
+            m_corr[i] = local_c.mean()
+
+
+        # ---------- logFC in peak region -----------------------------
+        safe1 = np.maximum(mES1_fl, pct)
+        safe2 = np.maximum(mES2_fl, pct)
+        logFC = np.log(safe2 / (safe1 + EPS)) / np.log(FC_thresh)
+        logFC[:half_w]  = 0.0
+        logFC[-half_w:] = 0.0
+
+        idx = np.arange(half_w, n-half_w, step)
+        mu1 = np.maximum(m1_fl[idx], pct)                 
+        mu2 = np.maximum(m2_fl[idx], pct)
+        SE  = np.sqrt(1/mu1 + 1/mu2 + d1_fl[idx] + d2_fl[idx])        ### <<< CHANGED
+        Wald = logFC[idx] / SE
+        p    = 2 * (1 - norm.cdf(np.abs(Wald)))
+        lP   = -np.log10(np.where(p == 0, np.nan, p))
+
+        # ---------- assemble dataframe ----------
+        dfc = df_raw.copy()
+        dfc['corr']        = corr
+        dfc['m_corr']      = m_corr
+        dfc['hmw']         = hmw
+        dfc['logFC']       = logFC
+        dfc['SE'] = 0.0
+        dfc['Wald']            = 0.0
+        dfc['Wald_pValue']     = 0.0
+        dfc['log_Wald_pValue'] = 0.0
+        dfc.loc[idx, 'SE']            = SE
+        dfc.loc[idx, 'Wald']          = Wald
+        dfc.loc[idx, 'Wald_pValue']   = p
+        dfc.loc[idx, 'log_Wald_pValue'] = np.nan_to_num(lP, nan=0.0)
+
+        df_final = pd.concat([df_final, dfc], ignore_index=True)
 
-        df_chr[column1] = df_chr[column1].apply(lambda x: max(x, percentile_value_chr))
-        df_chr[column2] = df_chr[column2].apply(lambda x: max(x, percentile_value_chr))
+    # ---------- 3  stack & write  --------------------------------------
+    print("step3: write track_hmwC, track_ES")
+    df_final['signed_log_Wald_pValue'] = (np.sign(df_final['logFC']) * df_final['log_Wald_pValue'])
+    df_final['hmwC']   = df_final['m_corr'] * df_final['hmw']
 
-        # Ensure columns are in float64 to prevent the FutureWarning
-        df_chr[column1] = df_chr[column1].astype('float64')
-        df_chr[column2] = df_chr[column2].astype('float64')
+    df_final[['chr', 'start', 'end', 'hmwC']].to_csv(out_hmwC,sep='\t', header=False, index=False)
+    df_final[['chr', 'start', 'end', 'signed_log_Wald_pValue']].to_csv(out_ES,sep='\t', header=False, index=False)
+    
+    print(f"Saved outputs to {output_dir}")
 
-        # Initialize lists to store calculated values
-        mean_local_window_1 = [0] * n
-        mean_local_window_2 = [0] * n
-        var_local_window_1 = [0] * n
-        var_local_window_2 = [0] * n
-        dispersion_local_window_1 = [0] * n
-        dispersion_local_window_2 = [0] * n
-        pearson = [0] * n  # Initialize Pearson correlation values as floats
-        df_chr_add = df_chr.copy()
-        half_window = int((bin_number_of_window - 1) * 0.5)
-        print("Half window size:", half_window)
-
-        for i in range(half_window, n - half_window, step):
-            window_1 = df_chr[column1].iloc[i - half_window: i + half_window + 1]
-            window_2 = df_chr[column2].iloc[i - half_window: i + half_window + 1]
-            mean_local_window_1[i] = float(window_1.mean())
-            mean_local_window_2[i] = float(window_2.mean())
-            var_local_window_1[i] = float(window_1.var(ddof=0))
-            var_local_window_2[i] = float(window_2.var(ddof=0))
-            dispersion_local_window_1[i] = max(
-                (var_local_window_1[i] - mean_local_window_1[i]) / (mean_local_window_1[i] ** 2), 0)
-            dispersion_local_window_2[i] = max(
-                (var_local_window_2[i] - mean_local_window_2[i]) / (mean_local_window_2[i] ** 2), 0)
-            if len(set(window_1)) > 1 and len(set(window_2)) > 1:
-                pearson[i], _ = pearsonr(window_1, window_2)
-
-        # Assign the results back to the DataFrame
-        df_chr_add['mean_local_window_1'] = mean_local_window_1
-        df_chr_add['mean_local_window_2'] = mean_local_window_2
-        df_chr_add['var_local_window_1'] = var_local_window_1
-        df_chr_add['var_local_window_2'] = var_local_window_2
-        df_chr_add['pearson'] = pearson
-        df_chr_add['dispersion_local_window_1'] = dispersion_local_window_1
-        df_chr_add['dispersion_local_window_2'] = dispersion_local_window_2
-
-        # Perform Wald test for the current chromosome
-        n_chr = df_chr_add.shape[0]
-        indices = df_chr_add.index[half_window:n_chr - half_window]
-
-        # Initialize columns with float values to avoid dtype issues
-        df_chr_add['SE'] = 0.0
-        df_chr_add['log2Enrichment'] = 0.0
-        df_chr_add['Wald'] = 0.0
-        df_chr_add['Wald_pValue'] = 1.0
-        df_chr_add['log_Wald_pValue'] = 0.0
-
-        # Perform calculations with float64 values
-        df_chr_add.loc[indices, 'SE'] = np.sqrt(
-            1 / df_chr_add.loc[indices, 'mean_local_window_1'] + 1 / df_chr_add.loc[indices, 'mean_local_window_2'] +
-            df_chr_add.loc[indices, 'dispersion_local_window_1'] + df_chr_add.loc[indices, 'dispersion_local_window_2']
-        ).astype(float)
-
-        df_chr_add.loc[indices, 'log2Enrichment'] = np.log2(
-            df_chr_add.loc[indices, 'mean_local_window_2'] / df_chr_add.loc[indices, 'mean_local_window_1']
-        ).astype(float)
-
-        df_chr_add.loc[indices, 'Wald'] = df_chr_add.loc[indices, 'log2Enrichment'] / df_chr_add.loc[indices, 'SE']
-        df_chr_add.loc[indices, 'Wald_pValue'] = 2 * (1 - norm.cdf(np.abs(df_chr_add.loc[indices, 'Wald'])))
-
-        # Avoid division by zero or taking log of zero
-        df_chr_add.loc[indices, 'log_Wald_pValue'] = -np.log10(
-            df_chr_add.loc[indices, 'Wald_pValue'].replace(0, np.nan)
-        ).fillna(0.0)
-
-        # Append the processed chromosome data to df_final
-        df_final = pd.concat([df_final, df_chr_add], ignore_index=True)
-
-    if df_final.empty:
-        print("No data processed.")
-        sys.exit(1)
-
-    # Update df with the processed data
-    df = df_final
-
-    # Extract the desired columns for output
-    tracks_pearson = df[['chr', 'start', 'end', 'pearson']]
-    tracks_log_Wald_pValue = df[['chr', 'start', 'end', 'log_Wald_pValue']]
-
-    # Save the outputs
-    tracks_pearson.to_csv(output_pearson_file, index=False, header=None, sep='\t')
-    tracks_log_Wald_pValue.to_csv(output_wald_pvalue_file, index=False, header=None, sep='\t')
-
-    print(f"Output files have been saved to {output_dir}")
-
-
-def localWeightedPearson_and_enrichmentSignificance(df, column1='readNum_1', column2='readNum_2', bin_number_of_window=11, step=1,
-                                        output_dir='output', chroms=None, **method_params):
-    """
-    Method to calculate local weighted Pearson correlation and enrichment.
-    This function processes the DataFrame and saves the output directly.
-
-    Parameters:
-    - df (pd.DataFrame): DataFrame containing the merged tracks with columns 'chr', 'start', 'end', column1, column2.
-    - column1 (str): Column name for track1 data in the DataFrame (default is 'readNum_1').
-    - column2 (str): Column name for track2 data in the DataFrame (default is 'readNum_2').
-    - bin_number_of_window (int): Number of bins in the sliding window. Default is 11.
-    - step (int): Step size for the sliding window. Default is 1.
-    - output_dir (str): Directory to save the output files. Default is 'output'.
-    - chroms (list): List of chromosomes to process. If None, all chromosomes are processed.
-    - **method_params: Additional method-specific parameters (e.g., 'percentile').
-
-    Outputs:
-    - Saves 'track_locCor.bedgraph' and 'track_ES.bedgraph' in the output directory.
-    """
-    print("Using localWeightedPearson_and_enrichmentSignificance (locWP_and_ES)")
-    # Extract method-specific parameters
-    percentile = method_params.get('percentile', 5)  # Default percentile is 5
-
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Define the output file paths
-    output_weightedPearson_file = os.path.join(output_dir, 'track_locCor.bedgraph')
-    output_wald_pvalue_file = os.path.join(output_dir, 'track_ES.bedgraph')
-
-    # Initialize the final DataFrame
-    df_final = pd.DataFrame()
-
-    # Process specified chromosomes or all chromosomes
-    if chroms:
-        chromosomes = chroms
-    else:
-        chromosomes = df['chr'].unique()
-
-    for chrom in chromosomes:
-        df_chr = df[df['chr'] == chrom].reset_index(drop=True)
-        n = df_chr.shape[0]
-        if n == 0:
-            print(f"No data found for chromosome {chrom}")
-            continue
-        print(f"Processing {chrom} with {n} bins")
-
-        # Replace values below the specified percentile within the chromosome
-        all_values_chr = pd.concat([df_chr[column1], df_chr[column2]])
-        non_zero_values_chr = all_values_chr[all_values_chr > 0]
-        if len(non_zero_values_chr) == 0:
-            percentile_value_chr = 0
-        else:
-            percentile_value_chr = np.percentile(non_zero_values_chr, percentile)
-        print(f"{chrom} Percentile value: {percentile_value_chr}")
-
-        df_chr[column1] = df_chr[column1].apply(lambda x: max(x, percentile_value_chr))
-        df_chr[column2] = df_chr[column2].apply(lambda x: max(x, percentile_value_chr))
-
-        # Ensure columns are in float64 to prevent the FutureWarning
-        df_chr[column1] = df_chr[column1].astype('float64')
-        df_chr[column2] = df_chr[column2].astype('float64')
-
-        mean_local_window_1 = [0] * n
-        mean_local_window_2 = [0] * n
-        var_local_window_1 = [0] * n
-        var_local_window_2 = [0] * n
-        dispersion_local_window_1 = [0] * n
-        dispersion_local_window_2 = [0] * n
-        weighted_pearson = [0] * n
-        df_chr_add = df_chr.copy()
-        half_window = int((bin_number_of_window - 1) * 0.5)
-        print("Half window size:", half_window)
-        weights_local = np.array([2 ** (-abs(i)) for i in range(-half_window, half_window + 1)])
-        print("Weights_local array:", weights_local)
-
-        for i in range(half_window, n - half_window, step):
-            window_1 = df_chr[column1].iloc[i - half_window: i + half_window + 1]
-            window_2 = df_chr[column2].iloc[i - half_window: i + half_window + 1]
-            weighted_1 = window_1 * weights_local
-            weighted_2 = window_2 * weights_local
-            mean_local_window_1[i] = window_1.mean()
-            mean_local_window_2[i] = window_2.mean()
-            var_local_window_1[i] = window_1.var(ddof=0)
-            var_local_window_2[i] = window_2.var(ddof=0)
-            dispersion_local_window_1[i] = max(
-                (var_local_window_1[i] - mean_local_window_1[i]) / (mean_local_window_1[i] ** 2), 0)
-            dispersion_local_window_2[i] = max(
-                (var_local_window_2[i] - mean_local_window_2[i]) / (mean_local_window_2[i] ** 2), 0)
-            if len(set(window_1)) > 1 and len(set(window_2)) > 1:
-                weighted_pearson[i], _ = pearsonr(weighted_1, weighted_2)
-        df_chr_add['mean_local_window_1'] = mean_local_window_1
-        df_chr_add['mean_local_window_2'] = mean_local_window_2
-        df_chr_add['var_local_window_1'] = var_local_window_1
-        df_chr_add['var_local_window_2'] = var_local_window_2
-        df_chr_add['weighted_pearson'] = weighted_pearson
-        df_chr_add['dispersion_local_window_1'] = dispersion_local_window_1
-        df_chr_add['dispersion_local_window_2'] = dispersion_local_window_2
-
-        # Perform Wald test for the current chromosome
-        n_chr = df_chr_add.shape[0]
-        indices = df_chr_add.index[half_window:n_chr - half_window]
-
-        # Initialize columns
-        df_chr_add['SE'] = 0.0
-        df_chr_add['log2Enrichment'] = 0.0
-        df_chr_add['Wald'] = 0.0
-        df_chr_add['Wald_pValue'] = 1.0
-        df_chr_add['log_Wald_pValue'] = 0.0
-
-        # Perform calculations
-        df_chr_add.loc[indices, 'SE'] = np.sqrt(
-            1 / df_chr_add.loc[indices, 'mean_local_window_1'] + 1 / df_chr_add.loc[indices, 'mean_local_window_2'] +
-            df_chr_add.loc[indices, 'dispersion_local_window_1'] + df_chr_add.loc[indices, 'dispersion_local_window_2']
-        ).astype('float64')
-        df_chr_add.loc[indices, 'log2Enrichment'] = np.log2(
-            df_chr_add.loc[indices, 'mean_local_window_2'] / df_chr_add.loc[indices, 'mean_local_window_1']
-        )
-        df_chr_add.loc[indices, 'Wald'] = df_chr_add.loc[indices, 'log2Enrichment'] / df_chr_add.loc[indices, 'SE']
-        df_chr_add.loc[indices, 'Wald_pValue'] = 2 * (1 - norm.cdf(np.abs(df_chr_add.loc[indices, 'Wald'])))
-
-        # Avoid division by zero or taking log of zero
-        df_chr_add.loc[indices, 'log_Wald_pValue'] = -np.log10(
-            df_chr_add.loc[indices, 'Wald_pValue'].replace(0, np.nan)
-        ).fillna(0)
-
-        # Append the processed chromosome data to df_final
-        df_final = pd.concat([df_final, df_chr_add], ignore_index=True)
-
-    if df_final.empty:
-        print("No data processed.")
-        sys.exit(1)
-
-    # Update df with the processed data
-    df = df_final
-
-    # Extract the desired columns for output
-    tracks_weightedPearson = df[['chr', 'start', 'end', 'weighted_pearson']]
-    tracks_log_Wald_pValue = df[['chr', 'start', 'end', 'log_Wald_pValue']]
-
-    # Save the outputs
-    tracks_weightedPearson.to_csv(output_weightedPearson_file, index=False, header=None, sep='\t')
-    tracks_log_Wald_pValue.to_csv(output_wald_pvalue_file, index=False, header=None, sep='\t')
-
-    print(f"Output files have been saved to {output_dir}")
-
-
-def localSpearman_and_enrichmentSignificance(df, column1='readNum_1', column2='readNum_2', bin_number_of_window=11, step=1,
-                                 output_dir='output', chroms=None, **method_params):
-    """
-    Method to calculate local Spearman correlation and enrichment.
-    This function processes the DataFrame and saves the output directly.
-
-    Parameters:
-    - df (pd.DataFrame): DataFrame containing the merged tracks with columns 'chr', 'start', 'end', column1, column2.
-    - column1 (str): Column name for track1 data in the DataFrame (default is 'readNum_1').
-    - column2 (str): Column name for track2 data in the DataFrame (default is 'readNum_2').
-    - bin_number_of_window (int): Number of bins in the sliding window. Default is 11.
-    - step (int): Step size for the sliding window. Default is 1.
-    - output_dir (str): Directory to save the output files. Default is 'output'.
-    - chroms (list): List of chromosomes to process. If None, all chromosomes are processed.
-    - **method_params: Additional method-specific parameters (e.g., 'percentile').
-
-    Outputs:
-    - Saves 'track_locCor.bedgraph' and 'track_ES.bedgraph' in the output directory.
-    """
-    print("Using localSpearman_and_enrichmentSignificance (locS_and_ES)")
-    # Extract method-specific parameters
-    percentile = method_params.get('percentile', 5)  # Default percentile is 5
-
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Define the output file paths
-    output_spearman_file = os.path.join(output_dir, 'track_locCor.bedgraph')
-    output_wald_pvalue_file = os.path.join(output_dir, 'track_ES.bedgraph')
-
-    # Initialize the final DataFrame
-    df_final = pd.DataFrame()
-
-    # Process specified chromosomes or all chromosomes
-    if chroms:
-        chromosomes = chroms
-    else:
-        chromosomes = df['chr'].unique()
-
-    for chrom in chromosomes:
-        df_chr = df[df['chr'] == chrom].reset_index(drop=True)
-        n = df_chr.shape[0]
-        if n == 0:
-            print(f"No data found for chromosome {chrom}")
-            continue
-        print(f"Processing {chrom} with {n} bins")
-
-        # Replace values below the specified percentile within the chromosome
-        all_values_chr = pd.concat([df_chr[column1], df_chr[column2]])
-        non_zero_values_chr = all_values_chr[all_values_chr > 0]
-        if len(non_zero_values_chr) == 0:
-            percentile_value_chr = 0
-        else:
-            percentile_value_chr = np.percentile(non_zero_values_chr, percentile)
-        print(f"{chrom} Percentile value: {percentile_value_chr}")
-
-        df_chr[column1] = df_chr[column1].apply(lambda x: max(x, percentile_value_chr))
-        df_chr[column2] = df_chr[column2].apply(lambda x: max(x, percentile_value_chr))
-
-        # Ensure columns are in float64 to prevent the FutureWarning
-        df_chr[column1] = df_chr[column1].astype('float64')
-        df_chr[column2] = df_chr[column2].astype('float64')
-
-        mean_local_window_1 = [0] * n
-        mean_local_window_2 = [0] * n
-        var_local_window_1 = [0] * n
-        var_local_window_2 = [0] * n
-        dispersion_local_window_1 = [0] * n
-        dispersion_local_window_2 = [0] * n
-        spearman = [0] * n
-        df_chr_add = df_chr.copy()
-        half_window = int((bin_number_of_window - 1) * 0.5)
-        print("Half window size:", half_window)
-
-        for i in range(half_window, n - half_window, step):
-            window_1 = df_chr[column1].iloc[i - half_window: i + half_window + 1]
-            window_2 = df_chr[column2].iloc[i - half_window: i + half_window + 1]
-            mean_local_window_1[i] = window_1.mean()
-            mean_local_window_2[i] = window_2.mean()
-            var_local_window_1[i] = window_1.var(ddof=0)
-            var_local_window_2[i] = window_2.var(ddof=0)
-            dispersion_local_window_1[i] = max(
-                (var_local_window_1[i] - mean_local_window_1[i]) / (mean_local_window_1[i] ** 2), 0)
-            dispersion_local_window_2[i] = max(
-                (var_local_window_2[i] - mean_local_window_2[i]) / (mean_local_window_2[i] ** 2), 0)
-            if len(set(window_1)) > 1 and len(set(window_2)) > 1:
-                spearman[i], _ = spearmanr(window_1, window_2)
-
-        df_chr_add['mean_local_window_1'] = mean_local_window_1
-        df_chr_add['mean_local_window_2'] = mean_local_window_2
-        df_chr_add['var_local_window_1'] = var_local_window_1
-        df_chr_add['var_local_window_2'] = var_local_window_2
-        df_chr_add['spearman'] = spearman
-        df_chr_add['dispersion_local_window_1'] = dispersion_local_window_1
-        df_chr_add['dispersion_local_window_2'] = dispersion_local_window_2
-
-        # Perform Wald test for the current chromosome
-        n_chr = df_chr_add.shape[0]
-        indices = df_chr_add.index[half_window:n_chr - half_window]
-
-        # Initialize columns
-        df_chr_add['SE'] = 0.0
-        df_chr_add['log2Enrichment'] = 0.0
-        df_chr_add['Wald'] = 0.0
-        df_chr_add['Wald_pValue'] = 1.0
-        df_chr_add['log_Wald_pValue'] = 0.0
-
-        # Perform calculations
-        df_chr_add.loc[indices, 'SE'] = np.sqrt(
-            1 / df_chr_add.loc[indices, 'mean_local_window_1'] + 1 / df_chr_add.loc[indices, 'mean_local_window_2'] +
-            df_chr_add.loc[indices, 'dispersion_local_window_1'] + df_chr_add.loc[indices, 'dispersion_local_window_2']
-        )
-        df_chr_add.loc[indices, 'log2Enrichment'] = np.log2(
-            df_chr_add.loc[indices, 'mean_local_window_2'] / df_chr_add.loc[indices, 'mean_local_window_1']
-        )
-        df_chr_add.loc[indices, 'Wald'] = df_chr_add.loc[indices, 'log2Enrichment'] / df_chr_add.loc[indices, 'SE']
-        df_chr_add.loc[indices, 'Wald_pValue'] = 2 * (1 - norm.cdf(np.abs(df_chr_add.loc[indices, 'Wald'])))
-
-        # Avoid division by zero or taking log of zero
-        df_chr_add.loc[indices, 'log_Wald_pValue'] = -np.log10(
-            df_chr_add.loc[indices, 'Wald_pValue'].replace(0, np.nan)
-        ).fillna(0)
-
-        # Append the processed chromosome data to df_final
-        df_final = pd.concat([df_final, df_chr_add], ignore_index=True)
-
-    if df_final.empty:
-        print("No data processed.")
-        sys.exit(1)
-
-    # Update df with the processed data
-    df = df_final
-
-    # Extract the desired columns for output
-    tracks_spearman = df[['chr', 'start', 'end', 'spearman']]
-    tracks_log_Wald_pValue = df[['chr', 'start', 'end', 'log_Wald_pValue']]
-
-    # Save the outputs
-    tracks_spearman.to_csv(output_spearman_file, index=False, header=None, sep='\t')
-    tracks_log_Wald_pValue.to_csv(output_wald_pvalue_file, index=False, header=None, sep='\t')
-
-    print(f"Output files have been saved to {output_dir}")
-
-
-def localWeightedSpearman_and_enrichmentSignificance(df, column1='readNum_1', column2='readNum_2', bin_number_of_window=11, step=1,
-                                         output_dir='output', chroms=None, **method_params):
-    """
-    Method to calculate local weighted Spearman correlation and enrichment.
-    This function processes the DataFrame and saves the output directly.
-
-    Parameters:
-    - df (pd.DataFrame): DataFrame containing the merged tracks with columns 'chr', 'start', 'end', column1, column2.
-    - column1 (str): Column name for track1 data in the DataFrame (default is 'readNum_1').
-    - column2 (str): Column name for track2 data in the DataFrame (default is 'readNum_2').
-    - bin_number_of_window (int): Number of bins in the sliding window. Default is 11.
-    - step (int): Step size for the sliding window. Default is 1.
-    - output_dir (str): Directory to save the output files. Default is 'output'.
-    - chroms (list): List of chromosomes to process. If None, all chromosomes are processed.
-    - **method_params: Additional method-specific parameters (e.g., 'percentile').
-
-    Outputs:
-    - Saves 'track_locCor.bedgraph' and 'track_ES.bedgraph' in the output directory.
-    """
-    print("Using localWeightedSpearman_and_enrichmentSignificance (locWS_and_ES)")
-    # Extract method-specific parameters
-    percentile = method_params.get('percentile', 5)  # Default percentile is 5
-
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Define the output file paths
-    output_weightedSpearman_file = os.path.join(output_dir, 'track_locCor.bedgraph')
-    output_wald_pvalue_file = os.path.join(output_dir, 'track_ES.bedgraph')
-
-    # Initialize the final DataFrame
-    df_final = pd.DataFrame()
-
-    # Process specified chromosomes or all chromosomes
-    if chroms:
-        chromosomes = chroms
-    else:
-        chromosomes = df['chr'].unique()
-
-    for chrom in chromosomes:
-        df_chr = df[df['chr'] == chrom].reset_index(drop=True)
-        n = df_chr.shape[0]
-        if n == 0:
-            print(f"No data found for chromosome {chrom}")
-            continue
-        print(f"Processing {chrom} with {n} bins")
-
-        # Replace values below the specified percentile within the chromosome
-        all_values_chr = pd.concat([df_chr[column1], df_chr[column2]])
-        non_zero_values_chr = all_values_chr[all_values_chr > 0]
-        if len(non_zero_values_chr) == 0:
-            percentile_value_chr = 0
-        else:
-            percentile_value_chr = np.percentile(non_zero_values_chr, percentile)
-        print(f"{chrom} Percentile value: {percentile_value_chr}")
-
-        df_chr[column1] = df_chr[column1].apply(lambda x: max(x, percentile_value_chr))
-        df_chr[column2] = df_chr[column2].apply(lambda x: max(x, percentile_value_chr))
-
-        # Ensure columns are in float64 to prevent the FutureWarning
-        df_chr[column1] = df_chr[column1].astype('float64')
-        df_chr[column2] = df_chr[column2].astype('float64')
-
-        mean_local_window_1 = [0] * n
-        mean_local_window_2 = [0] * n
-        var_local_window_1 = [0] * n
-        var_local_window_2 = [0] * n
-        dispersion_local_window_1 = [0] * n
-        dispersion_local_window_2 = [0] * n
-        weighted_spearman = [0] * n
-        df_chr_add = df_chr.copy()
-        half_window = int((bin_number_of_window - 1) * 0.5)
-        print("Half window size:", half_window)
-        weights_local = np.array([2 ** (-abs(i)) for i in range(-half_window, half_window + 1)])
-        print("Weights_local array:", weights_local)
-
-        for i in range(half_window, n - half_window, step):
-            window_1 = df_chr[column1].iloc[i - half_window: i + half_window + 1]
-            window_2 = df_chr[column2].iloc[i - half_window: i + half_window + 1]
-            weighted_1 = window_1 * weights_local
-            weighted_2 = window_2 * weights_local
-            mean_local_window_1[i] = window_1.mean()
-            mean_local_window_2[i] = window_2.mean()
-            var_local_window_1[i] = window_1.var(ddof=0)
-            var_local_window_2[i] = window_2.var(ddof=0)
-            dispersion_local_window_1[i] = max(
-                (var_local_window_1[i] - mean_local_window_1[i]) / (mean_local_window_1[i] ** 2), 0)
-            dispersion_local_window_2[i] = max(
-                (var_local_window_2[i] - mean_local_window_2[i]) / (mean_local_window_2[i] ** 2), 0)
-
-            if len(set(window_1)) > 1 and len(set(window_2)) > 1:
-                weighted_spearman[i], _ = spearmanr(weighted_1, weighted_2)
-
-        df_chr_add['mean_local_window_1'] = mean_local_window_1
-        df_chr_add['mean_local_window_2'] = mean_local_window_2
-        df_chr_add['var_local_window_1'] = var_local_window_1
-        df_chr_add['var_local_window_2'] = var_local_window_2
-        df_chr_add['weighted_spearman'] = weighted_spearman
-        df_chr_add['dispersion_local_window_1'] = dispersion_local_window_1
-        df_chr_add['dispersion_local_window_2'] = dispersion_local_window_2
-
-        # Perform Wald test for the current chromosome
-        n_chr = df_chr_add.shape[0]
-        indices = df_chr_add.index[half_window:n_chr - half_window]
-
-        # Initialize columns
-        df_chr_add['SE'] = 0.0
-        df_chr_add['log2Enrichment'] = 0.0
-        df_chr_add['Wald'] = 0.0
-        df_chr_add['Wald_pValue'] = 1.0
-        df_chr_add['log_Wald_pValue'] = 0.0
-
-        # Perform calculations
-        df_chr_add.loc[indices, 'SE'] = np.sqrt(
-            1 / df_chr_add.loc[indices, 'mean_local_window_1'] + 1 / df_chr_add.loc[indices, 'mean_local_window_2'] +
-            df_chr_add.loc[indices, 'dispersion_local_window_1'] + df_chr_add.loc[indices, 'dispersion_local_window_2']
-        )
-        df_chr_add.loc[indices, 'log2Enrichment'] = np.log2(
-            df_chr_add.loc[indices, 'mean_local_window_2'] / df_chr_add.loc[indices, 'mean_local_window_1']
-        )
-        df_chr_add.loc[indices, 'Wald'] = df_chr_add.loc[indices, 'log2Enrichment'] / df_chr_add.loc[indices, 'SE']
-        df_chr_add.loc[indices, 'Wald_pValue'] = 2 * (1 - norm.cdf(np.abs(df_chr_add.loc[indices, 'Wald'])))
-
-        # Avoid division by zero or taking log of zero
-        df_chr_add.loc[indices, 'log_Wald_pValue'] = -np.log10(
-            df_chr_add.loc[indices, 'Wald_pValue'].replace(0, np.nan)
-        ).fillna(0)
-
-        # Append the processed chromosome data to df_final
-        df_final = pd.concat([df_final, df_chr_add], ignore_index=True)
-
-    if df_final.empty:
-        print("No data processed.")
-        sys.exit(1)
-
-    # Update df with the processed data
-    df = df_final
-
-    # Extract the desired columns for output
-    tracks_weightedSpearman = df[['chr', 'start', 'end', 'weighted_spearman']]
-    tracks_log_Wald_pValue = df[['chr', 'start', 'end', 'log_Wald_pValue']]
-
-    # Save the outputs
-    tracks_weightedSpearman.to_csv(output_weightedSpearman_file, index=False, header=None, sep='\t')
-    tracks_log_Wald_pValue.to_csv(output_wald_pvalue_file, index=False, header=None, sep='\t')
-
-    print(f"Output files have been saved to {output_dir}")
-
-
-def localMI_and_enrichmentSignificance(df, column1='readNum_1', column2='readNum_2', bin_number_of_window=11, step=1,
-                           output_dir='output', chroms=None, **method_params):
-    """
-    Method to calculate local Mutual Information (MI) and enrichment.
-    This function processes the DataFrame and saves the output directly.
-
-    Parameters:
-    - df (pd.DataFrame): DataFrame containing the merged tracks with columns 'chr', 'start', 'end', column1, column2.
-    - column1 (str): Column name for track1 data in the DataFrame (default is 'readNum_1').
-    - column2 (str): Column name for track2 data in the DataFrame (default is 'readNum_2').
-    - bin_number_of_window (int): Number of bins in the sliding window. Default is 11.
-    - step (int): Step size for the sliding window. Default is 1.
-    - output_dir (str): Directory to save the output files. Default is 'output'.
-    - chroms (list): List of chromosomes to process. If None, all chromosomes are processed.
-    - **method_params: Additional method-specific parameters (e.g., 'percentile').
-
-    Outputs:
-    - Saves 'track_locCor.bedgraph' and 'track_ES.bedgraph' in the output directory.
-    """
-    print("Using localMutualInformation_and_enrichmentSignificance (locMI_and_ES)")
-
-    # Kraskov MI Function (defined inside the localMI_and_enrichmentSignificance function)
-    def kraskov_mi(x, y, k=10):
-        """
-        Compute mutual information using the Kraskov method for nearest neighbors.
-
-        Parameters:
-        - x, y: Arrays of data points.
-        - k: The number of nearest neighbors.
-        """
-        assert len(x) == len(y)
-        N = len(x)
-        x = np.array(x).reshape(N, 1)
-        y = np.array(y).reshape(N, 1)
-        data = np.hstack((x, y))
-
-        # Compute distances to the k-th nearest neighbor in joint space
-        tree = NearestNeighbors(metric='chebyshev')
-        tree.fit(data)
-        distances, _ = tree.kneighbors(n_neighbors=k + 1)
-        eps = distances[:, k]  # Distance to k-th nearest neighbor
-
-        # Initialize counts
-        nx = np.zeros(N)
-        ny = np.zeros(N)
-
-        # Compute marginal counts
-        tree_x = NearestNeighbors(metric='chebyshev')
-        tree_x.fit(x)
-        tree_y = NearestNeighbors(metric='chebyshev')
-        tree_y.fit(y)
-
-        for i in range(N):
-            # Adjust epsilon to exclude points at distance exactly equal to eps[i]
-            if eps[i] > 0:
-                eps_i = eps[i] - 1e-10
-            else:
-                eps_i = 0.0
-
-            # Count the number of neighbors within eps_i in the marginal spaces
-            nx[i] = len(tree_x.radius_neighbors([x[i]], radius=eps_i, return_distance=False)[0]) - 1
-            ny[i] = len(tree_y.radius_neighbors([y[i]], radius=eps_i, return_distance=False)[0]) - 1
-
-        # Compute mutual information
-        mi = digamma(k) - (np.mean(digamma(nx + 1) + digamma(ny + 1))) + digamma(N)
-        return mi
-
-    # Extract method-specific parameters
-    percentile = method_params.get('percentile', 5)  # Default percentile is 5
-
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Define the output file paths
-    output_mutualInformation_file = os.path.join(output_dir, 'track_locCor.bedgraph')
-    output_wald_pvalue_file = os.path.join(output_dir, 'track_ES.bedgraph')
-
-    # Initialize the final DataFrame
-    df_final = pd.DataFrame()
-
-    # Process specified chromosomes or all chromosomes
-    if chroms:
-        chromosomes = chroms
-    else:
-        chromosomes = df['chr'].unique()
-
-    for chrom in chromosomes:
-        df_chr = df[df['chr'] == chrom].reset_index(drop=True)
-        n = df_chr.shape[0]
-        if n == 0:
-            print(f"No data found for chromosome {chrom}")
-            continue
-        print(f"Processing {chrom} with {n} bins")
-
-        # Replace values below the specified percentile within the chromosome
-        all_values_chr = pd.concat([df_chr[column1], df_chr[column2]])
-        non_zero_values_chr = all_values_chr[all_values_chr > 0]
-        if len(non_zero_values_chr) == 0:
-            percentile_value_chr = 0
-        else:
-            percentile_value_chr = np.percentile(non_zero_values_chr, percentile)
-        print(f"{chrom} Percentile value: {percentile_value_chr}")
-
-        df_chr[column1] = df_chr[column1].apply(lambda x: max(x, percentile_value_chr))
-        df_chr[column2] = df_chr[column2].apply(lambda x: max(x, percentile_value_chr))
-
-        # Ensure columns are in float64 to prevent the FutureWarning
-        df_chr[column1] = df_chr[column1].astype('float64')
-        df_chr[column2] = df_chr[column2].astype('float64')
-
-        # Initialize variables
-        mean_local_window_1 = [0] * n
-        mean_local_window_2 = [0] * n
-        var_local_window_1 = [0] * n
-        var_local_window_2 = [0] * n
-        dispersion_local_window_1 = [0] * n
-        dispersion_local_window_2 = [0] * n
-        mutual_information = [0] * n
-        df_chr_add = df_chr.copy()
-        half_window = int((bin_number_of_window - 1) * 0.5)
-        print("Half window size:", half_window)
-
-        for i in range(half_window, n - half_window, step):
-            window_1 = df_chr[column1].iloc[i - half_window: i + half_window + 1]
-            window_2 = df_chr[column2].iloc[i - half_window: i + half_window + 1]
-
-            # Calculate Mutual Information
-            mutual_information[i] = max(kraskov_mi(window_1, window_2, k=bin_number_of_window - 2), 0)
-
-            # Compute statistics
-            mean_local_window_1[i] = window_1.mean()
-            mean_local_window_2[i] = window_2.mean()
-            var_local_window_1[i] = window_1.var(ddof=0)
-            var_local_window_2[i] = window_2.var(ddof=0)
-            dispersion_local_window_1[i] = max(
-                (var_local_window_1[i] - mean_local_window_1[i]) / (mean_local_window_1[i] ** 2), 0)
-            dispersion_local_window_2[i] = max(
-                (var_local_window_2[i] - mean_local_window_2[i]) / (mean_local_window_2[i] ** 2), 0)
-
-        # Add results to the DataFrame
-        df_chr_add['mean_local_window_1'] = mean_local_window_1
-        df_chr_add['mean_local_window_2'] = mean_local_window_2
-        df_chr_add['var_local_window_1'] = var_local_window_1
-        df_chr_add['var_local_window_2'] = var_local_window_2
-        df_chr_add['mutual_information'] = mutual_information
-        df_chr_add['dispersion_local_window_1'] = dispersion_local_window_1
-        df_chr_add['dispersion_local_window_2'] = dispersion_local_window_2
-
-        # Perform Wald test for the current chromosome
-        n_chr = df_chr_add.shape[0]
-        indices = df_chr_add.index[half_window:n_chr - half_window]
-
-        # Initialize columns
-        df_chr_add['SE'] = 0.0
-        df_chr_add['log2Enrichment'] = 0.0
-        df_chr_add['Wald'] = 0.0
-        df_chr_add['Wald_pValue'] = 1.0
-        df_chr_add['log_Wald_pValue'] = 0.0
-
-        # Perform calculations
-        df_chr_add.loc[indices, 'SE'] = np.sqrt(
-            1 / df_chr_add.loc[indices, 'mean_local_window_1'] + 1 / df_chr_add.loc[indices, 'mean_local_window_2'] +
-            df_chr_add.loc[indices, 'dispersion_local_window_1'] + df_chr_add.loc[indices, 'dispersion_local_window_2']
-        )
-        df_chr_add.loc[indices, 'log2Enrichment'] = np.log2(
-            df_chr_add.loc[indices, 'mean_local_window_2'] / df_chr_add.loc[indices, 'mean_local_window_1']
-        )
-        df_chr_add.loc[indices, 'Wald'] = df_chr_add.loc[indices, 'log2Enrichment'] / df_chr_add.loc[indices, 'SE']
-        df_chr_add.loc[indices, 'Wald_pValue'] = 2 * (1 - norm.cdf(np.abs(df_chr_add.loc[indices, 'Wald'])))
-
-        # Avoid division by zero or taking log of zero
-        df_chr_add.loc[indices, 'log_Wald_pValue'] = -np.log10(
-            df_chr_add.loc[indices, 'Wald_pValue'].replace(0, np.nan)
-        ).fillna(0)
-
-        df_final = pd.concat([df_final, df_chr_add])
-
-    if df_final.empty:
-        print("No data processed.")
-        sys.exit(1)
-
-    # Update df with the processed data
-    df = df_final
-
-    # Extract the desired columns for output
-    tracks_mutualInformation = df[['chr', 'start', 'end', 'mutual_information']]
-    tracks_log_Wald_pValue = df[['chr', 'start', 'end', 'log_Wald_pValue']]
-
-    # Save the outputs
-    tracks_mutualInformation.to_csv(output_mutualInformation_file, index=False, header=None, sep='\t')
-    tracks_log_Wald_pValue.to_csv(output_wald_pvalue_file, index=False, header=None, sep='\t')
-
-    print(f"Processing complete. Outputs saved to {output_dir}.")
 
 
 def visualize_tracks(input_files, output_file, method='pyGenomeTracks', region=None, colors=None):
@@ -1133,7 +504,7 @@ def visualize_with_plotly(input_files, output_file, region=None, colors=None):
     fig.write_html(output_file)
     print(f"Visualization saved to {output_file}")
 
-# Function to get the default Plotly color sequence for N tracks
+
 def get_plotly_default_colors(num_colors):
     # Use Plotly's default color sequence (which has at least 10 colors by default)
     plotly_colors = [
@@ -1149,234 +520,144 @@ def get_plotly_default_colors(num_colors):
     return plotly_colors[:num_colors]
 
 
+
 def find_significantly_different_regions(
-        track_enrichment_file,
-        track_correlation_file,
-        output_dir,
-        min_regionSize,
-        enrichment_high_percentile,
-        enrichment_low_percentile,
-        corr_high_percentile,
-        corr_low_percentile,
-        chroms=None,
-        chrom_sizes=None
+    track_ES_file: str,
+    track_hmwC_file: str,
+    output_dir: str,
+    p_thresh: float = 0.05,
+    binNum_thresh: int = 2,
+    chroms=None,
+    chrom_sizes=None
 ):
-    df_enrichment = pd.read_csv(
-        track_enrichment_file, sep='\t', header=None, names=['chr', 'start', 'end', 'ES']
-    )
-    df_corr = pd.read_csv(
-        track_correlation_file, sep='\t', header=None, names=['chr', 'start', 'end', 'locCorrelation']
-    )
-
-    # Merge the dataframes on genomic coordinates
-    df = pd.merge(df_enrichment, df_corr, on=['chr', 'start', 'end'])
-
-    # Remove bins with NaN values
-    df.dropna(subset=['ES', 'locCorrelation'], inplace=True)
-
-    # Determine chromosomes from chrom_sizes file if chroms='all' or chroms=None
-    if chroms and chroms != ['all']:
-        df = df[df['chr'].isin(chroms)]
-        if df.empty:
-            print(f"No data found for the specified chromosomes: {chroms}")
-            sys.exit(1)
-    else:
-        # Extract chromosomes from the chrom_sizes file
-        chromosomes = get_chromosomes_from_chrom_sizes(chrom_sizes)
-        if not chromosomes:
-            print("No chromosomes found in the chromosome sizes file.")
-            sys.exit(1)
-        df = df[df['chr'].isin(chromosomes)]
-        if df.empty:
-            print("No data found for chromosomes from chrom_sizes.")
-            sys.exit(1)
-
-    # Compute percentile ranks
-    df['enrichment_percentile'] = df['ES'].rank(pct=True) * 100
-    df['locCorrelation_percentile'] = df['locCorrelation'].rank(pct=True) * 100
-
-    # Call visualize_scatter_ES_and_locCorr here
-    visualize_scatter_ES_and_locCorr(df, output_dir, enrichment_high_percentile, enrichment_low_percentile,
-                                     corr_high_percentile, corr_low_percentile)
-
-    # Define thresholds
-    # For enrichment
-    df['high_enrichment'] = df['enrichment_percentile'] >= enrichment_high_percentile
-    df['low_enrichment'] = df['enrichment_percentile'] <= enrichment_low_percentile
-
-    # For correlation
-    df['high_corr'] = df['locCorrelation_percentile'] >= corr_high_percentile
-    df['low_corr'] = df['locCorrelation_percentile'] <= corr_low_percentile
-
-    # Identify categories
-    df['high_enrichment_high_corr'] = df['high_enrichment'] & df['high_corr']
-    df['high_enrichment_low_corr'] = df['high_enrichment'] & df['low_corr']
-    df['low_enrichment_high_corr'] = df['low_enrichment'] & df['high_corr']
-    df['low_enrichment_low_corr'] = df['low_enrichment'] & df['low_corr']
-
-    # Process each category
-    categories = {
-        'high_enrichment_high_correlation': df[df['high_enrichment_high_corr']],
-        'high_enrichment_low_correlation': df[df['high_enrichment_low_corr']],
-        'low_enrichment_high_correlation': df[df['low_enrichment_high_corr']],
-        'low_enrichment_low_correlation': df[df['low_enrichment_low_corr']],
-    }
-
-    for category, df_category in categories.items():
-        if df_category.empty:
-            print(f"No regions found for category {category}.")
-            continue
-
-        # Save the individual significant bins for this category
-        bins_output_file = os.path.join(output_dir, f"{category}_bins.bed")
-        df_category[['chr', 'start', 'end', 'ES', 'locCorrelation']].to_csv(
-            bins_output_file, sep='\t', header=True, index=False
-        )
-        print(f"Significant bins for category {category} saved to {bins_output_file}.")
-
-        # Merge adjacent bins into regions
-        significant_regions = merge_bins_into_regions(df_category, min_regionSize)
-
-        if significant_regions.empty:
-            print(f"No regions meet the minimum size for category {category}.")
-            continue
-
-        filename = f"{category}_regions.bed"
-        output_path = os.path.join(output_dir, filename)
-        significant_regions.to_csv(output_path, sep='\t', header=False, index=False)
-        print(f"Found {len(significant_regions)} regions for category {category}.")
-        print(f"Regions saved to {output_path}.")
-
-
-def merge_bins_into_regions(df_bins, min_regionSize):
     """
-    Merges adjacent bins into regions based on chromosome and start-end positions.
-
-    Parameters:
-    - df_bins (pd.DataFrame): DataFrame containing the bins to merge.
-    - min_regionSize (int): Minimum number of consecutive bins to define a region.
-
-    Returns:
-    - df_regions (pd.DataFrame): DataFrame containing merged regions.
+    1) Read track_ES.bedgraph and track_hmwC.bedgraph  
+    2) Merge on chr/start/end  
+    3) Keep bins with abs(ES) >= -log10(p_thresh) AND same sign runs of length>=min_region  
+    4) Write those bins (chr, start, end, ES, hmwC) to '<output_dir>/signif_bins.tsv'  
+    5) Merge adjacent bins into regions (same chr, end==next start), average hmwC across region  
+       and sort descending by avg_hmwC, write to '<output_dir>/signif_regions.tsv'  
+    6) Plot rank vs log(hmwC+1) for those regions, save '<output_dir>/hmwC_rank.png'  
     """
-    # Ensure the bins are sorted
-    df_bins = df_bins.sort_values(['chr', 'start']).reset_index(drop=True)
+    os.makedirs(output_dir, exist_ok=True)
 
-    significant_regions = []
-    current_region = None
+    # 1) read  
+    df_es = pd.read_csv(track_ES_file, sep='\t', header=None,
+                        names=['chr','start','end','ES'])
+    print(df_es.shape)
+    # print(df_es.head())
+    df_c  = pd.read_csv(track_hmwC_file, sep='\t', header=None,
+                        names=['chr','start','end','hmwC'])
+    print(df_c.shape)
+    # print(df_c.head())
+    # 2) merge  
+    df = pd.merge(df_es, df_c, on=['chr','start','end'])
+    print(df.shape)
+    # print(df.head())
 
-    for idx, row in df_bins.iterrows():
-        chrom = row['chr']
-        start = row['start']
-        end = row['end']
+    # 3) filter by ES  
+    thresh = -np.log10(p_thresh)
+    print(f'thresh: {thresh}')  
+    # split positive and negative extremes
+    df_pos = df[df['ES'] >=  thresh]
+    df_neg = df[df['ES'] <= -thresh]
+    # print(df_pos.shape)
+    # print(df_pos.head(50))
+    # print(df_neg.shape)
+    # print(df_neg.head(50))
 
-        if current_region is None:
-            # Start a new region
-            current_region = {'chr': chrom, 'start': start, 'end': end, 'bins': 1}
-        else:
-            # Check if the current bin is adjacent to the previous bin
-            if chrom == current_region['chr'] and start == current_region['end']:
-                # Extend the current region
-                current_region['end'] = end
-                current_region['bins'] += 1
-            else:
-                # Save the current region if it meets the minimum size
-                if current_region['bins'] >= min_regionSize:
-                    significant_regions.append(current_region)
-                # Start a new region
-                current_region = {'chr': chrom, 'start': start, 'end': end, 'bins': 1}
+    # helper to merge runs on same chromosome
+    def _merge_runs(df_bins):
+        regs = []
+        for chrom, grp in df_bins.groupby('chr'):
+            grp = grp.sort_values('start')
+            curr = None
+            for _, row in grp.iterrows():
+                if curr is None or row.start != curr['end']:
+                    # flush old
+                    if curr and curr['count'] >= binNum_thresh:
+                        regs.append(curr)
+                    curr = dict(chr=chrom,
+                                start=row.start,
+                                end=row.end,
+                                wvals=[row.hmwC],
+                                count=1)
+                else:
+                    curr['end']   = row.end
+                    curr['wvals'].append(row.hmwC)
+                    curr['count'] += 1
+            # last
+            if curr and curr['count'] >= binNum_thresh:
+                regs.append(curr)
+        # build DataFrame
+        df_regs = pd.DataFrame(regs)
+        # if no runs passed the threshold, just return empty frame with the right columns
+        if df_regs.empty:
+            return pd.DataFrame(columns=['chr','start','end','avg_hmwC'])
+        df_regs['avg_hmwC'] = df_regs['wvals'].apply(np.mean)
+        return df_regs[['chr','start','end','avg_hmwC']]
 
-    # Add the last region if it meets the minimum size
-    if current_region and current_region['bins'] >= min_regionSize:
-        significant_regions.append(current_region)
-
-    # Handle the case when significant_regions is empty
-    if significant_regions:
-        df_regions = pd.DataFrame(significant_regions)
-    else:
-        # Create an empty DataFrame with the required columns
-        df_regions = pd.DataFrame(columns=['chr', 'start', 'end', 'bins'])
-
-    return df_regions[['chr', 'start', 'end']]
-
-
-def visualize_scatter_ES_and_locCorr(df, output_dir, enrichment_high_percentile, enrichment_low_percentile, corr_high_percentile,
-                     corr_low_percentile):
-    # Compute the actual threshold values
-    enrichment_high_value = np.percentile(df['ES'], enrichment_high_percentile)
-    enrichment_low_value = np.percentile(df['ES'], enrichment_low_percentile)
-    corr_high_value = np.percentile(df['locCorrelation'], corr_high_percentile)
-    corr_low_value = np.percentile(df['locCorrelation'], corr_low_percentile)
-
-    # Create figure and gridspec
-    fig = plt.figure(figsize=(10, 10))
-    gs = GridSpec(4, 4, figure=fig)
-
-    # Main scatter plot
-    ax_main = fig.add_subplot(gs[1:4, 0:3])
-    scatter = ax_main.scatter(
-        df['ES'],
-        df['locCorrelation'],
-        c='blue',
-        alpha=0.5,
-        edgecolor='k'
+    # 4) write bins
+    df_pos_sig = df_pos.sort_values(['chr','start'])
+    pos_sig_n = df_pos_sig.shape[0]
+    pos_bins_out = os.path.join(output_dir, 'pos_signif_bins.tsv')
+    df_pos_sig[['chr','start','end','ES','hmwC']].to_csv(
+        pos_bins_out, sep='\t', index=False
     )
-    ax_main.set_xlabel('Enrich Significance')
-    ax_main.set_ylabel('Local Correlation')
-    ax_main.set_title('Enrich Significance vs Local Correlation')
-    ax_main.grid(True)
-
-    # Add threshold lines to scatter plot
-    ax_main.axvline(
-        x=enrichment_high_value,
-        color='red',
-        linestyle='--',
-        label=f'Enrichment High Threshold ({enrichment_high_percentile}th Percentile)'
+    print(f"{pos_sig_n} pos ignificant bins written to {pos_bins_out}")
+    df_neg_sig = df_neg.sort_values(['chr','start'])
+    neg_sig_n = df_neg_sig.shape[0]
+    neg_bins_out = os.path.join(output_dir, 'neg_signif_bins.tsv')
+    df_neg_sig[['chr','start','end', 'ES','hmwC']].to_csv(
+        neg_bins_out, sep='\t', index=False
     )
-    ax_main.axvline(
-        x=enrichment_low_value,
-        color='purple',
-        linestyle='--',
-        label=f'Enrichment Low Threshold ({enrichment_low_percentile}th Percentile)'
-    )
-    ax_main.axhline(
-        y=corr_high_value,
-        color='green',
-        linestyle='--',
-        label=f'Correlation High Threshold ({corr_high_percentile}th Percentile)'
-    )
-    ax_main.axhline(
-        y=corr_low_value,
-        color='orange',
-        linestyle='--',
-        label=f'Correlation Low Threshold ({corr_low_percentile}th Percentile)'
-    )
+    print(f"{neg_sig_n} neg ignificant bins written to {neg_bins_out}")
 
-    ax_main.legend(loc='upper right')
+    # 5) merge regions & write
+    df_pos_regs = _merge_runs(df_pos).sort_values('avg_hmwC', ascending=False)
+    pos_n = df_pos_regs.shape[0]
+    print(pos_n)
+    print(df_pos_regs.shape)
+    print(df_pos_regs)
 
-    # Cumulative distribution for Enrichment (ES) on top
-    ax_top = fig.add_subplot(gs[0, 0:3], sharex=ax_main)
-    sorted_enrichment = np.sort(df['ES'])
-    cumulative_enrichment = np.arange(1, len(sorted_enrichment) + 1) / len(sorted_enrichment)
-    ax_top.plot(sorted_enrichment, cumulative_enrichment, color='blue')
-    ax_top.set_ylabel('Cumulative Distribution')
-    ax_top.grid(True)
-    plt.setp(ax_top.get_xticklabels(), visible=False)
+    pos_regs_out = os.path.join(output_dir, 'signif_pos_regions.tsv')
+    df_pos_regs.to_csv(pos_regs_out, sep='\t', index=False)
+    print(f"{pos_n} merged pos regions written to {pos_regs_out}")
 
-    # Cumulative distribution for locCorrelation Correlation on the right
-    ax_right = fig.add_subplot(gs[1:4, 3], sharey=ax_main)
-    sorted_corr = np.sort(df['locCorrelation'])
-    cumulative_corr = np.arange(1, len(sorted_corr) + 1) / len(sorted_corr)
-    ax_right.plot(cumulative_corr, sorted_corr, color='blue')
-    ax_right.set_xlabel('Cumulative Distribution')
-    ax_right.grid(True)
-    plt.setp(ax_right.get_yticklabels(), visible=False)
 
-    # Adjust layout
-    plt.subplots_adjust(wspace=0.05, hspace=0.05)
+    df_neg_regs = _merge_runs(df_neg).sort_values('avg_hmwC', ascending=False)
+    neg_n = df_neg_regs.shape[0]
+    print(neg_n)
+    print(df_neg_regs.shape)
+    print(df_neg_regs)
 
-    # Save the plot
-    plot_path = os.path.join(output_dir, 'ES_vs_locCorr.png')
-    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    neg_regs_out = os.path.join(output_dir, 'signif_neg_regions.tsv')
+    df_neg_regs.to_csv(neg_regs_out, sep='\t', index=False)
+    print(f"{neg_n} merged neg regions written to {neg_regs_out}")
+
+    # 6) plot rank vs log(w+1)
+    df_pos_regs['rank'] = np.arange(1, len(df_pos_regs)+1)
+    plt.figure(figsize=(6,4))
+    plt.plot(df_pos_regs['rank'], np.log(df_pos_regs['avg_hmwC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    plt.xlabel('Region rank')
+    plt.ylabel('log(hmwC+1)')
+    plt.title('Ranked region hmwC')
+    plt.tight_layout()
+    fig_out = os.path.join(output_dir, 'hmwC_rank_in_pos_regions.png')
+    plt.savefig(fig_out, dpi=600)
     plt.close()
-    print(f"Enrichment Significance vs Local Correlation scatter plot saved to {plot_path}.")
+    print(f"Rank plot of pos regions saved to {fig_out}")
+
+    df_neg_regs['rank'] = np.arange(1, len(df_neg_regs)+1)
+    plt.figure(figsize=(6,4))
+    plt.plot(df_neg_regs['rank'], np.log(df_neg_regs['avg_hmwC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    plt.xlabel('Region rank')
+    plt.ylabel('log(hmwC+1)')
+    plt.title('Ranked region hmwC')
+    plt.tight_layout()
+    fig_out = os.path.join(output_dir, 'hmwC_rank_in_neg_regions.png')
+    plt.savefig(fig_out, dpi=600)
+    plt.close()
+    print(f"Rank plot of neg regions saved to {fig_out}")
+
+

@@ -1,12 +1,9 @@
 # File: pipeline.py
 
-import os
-import json
-import argparse
-import pandas as pd
+import argparse, os, sys
 from localfinder.commands.bin import main as bin_tracks_main
 from localfinder.commands.calc import main as calc_corr_main
-from localfinder.commands.findreg import main as find_regions_main
+from localfinder.commands.findreg import main as find_regions_main  
 from localfinder.utils import check_external_tools, get_chromosomes_from_chrom_sizes
 
 def run_pipeline(args):
@@ -55,28 +52,28 @@ def run_pipeline(args):
         track2=binned_files[1],
         output_dir=calc_output_dir,
         method=args.method,
-        method_params=json.dumps(args.method_params),  # Convert dict to JSON string
-        bin_num=args.bin_num,
+        percentile=args.percentile,
+        binNum_window=args.binNum_window,  ### <<< CHANGED
         step=args.step,
+        binNum_peak=args.binNum_peak,      ### <<< CHANGED
+        FC_thresh=args.FC_thresh,          ### <<< CHANGED
         chroms=chroms,
         chrom_sizes=args.chrom_sizes  # **Pass chrom_sizes to calc.py**
     )
     calc_corr_main(calc_args)
 
-    # Step 3: Find significantly different regions
-    find_output_dir = os.path.join(args.output_dir, 'significant_regions')
+    # ── 3. find significantly different regions ───────────────────────
+    find_output_dir = os.path.join(args.output_dir, "significant_regions")
     find_args = argparse.Namespace(
-        track_E=os.path.join(calc_output_dir, 'track_ES.bedgraph'),
-        track_C=os.path.join(calc_output_dir, 'track_locCor.bedgraph'),
-        output_dir=find_output_dir,
-        min_regionSize=args.min_regionSize,
-        E_upPercentile=args.E_upPercentile,
-        E_lowPercentile=args.E_lowPercentile,
-        C_upPercentile=args.C_upPercentile,
-        C_lowPercentile=args.C_lowPercentile,
-        chroms=chroms,
-        chrom_sizes=args.chrom_sizes  # **Pass chrom_sizes to findreg.py**
+        track_E   = os.path.join(calc_output_dir, "track_ES.bedgraph"),   ### FIX
+        track_C   = os.path.join(calc_output_dir, "track_hmwC.bedgraph"), ### FIX
+        output_dir      = find_output_dir,
+        p_thresh        = args.p_thresh,        ### FIX
+        binNum_thresh   = args.binNum_thresh,   ### FIX
+        chroms          = chroms,
+        chrom_sizes     = args.chrom_sizes,
     )
     find_regions_main(find_args)
 
     print("Pipeline completed successfully.")
+

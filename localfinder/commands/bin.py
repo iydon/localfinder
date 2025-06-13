@@ -1,8 +1,6 @@
 # File: commands/bin_tracks.py
 
-import os
-import argparse
-import pandas as pd
+import os, pandas as pd
 from localfinder.utils import process_and_bin_file, check_external_tools, get_chromosomes_from_chrom_sizes
 
 def main(args):

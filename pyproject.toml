@@ -1,3 +1,44 @@
+# ─── pyproject.toml ────────────────────────────────────────────────────
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=64", "wheel"]          # build back-end runtime
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "localfinder"
+version = "0.1.18"
+description = "Weighted local correlation & enrichment significance of two genomic tracks"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Pengfei Yin", email = "12133074@mail.sustech.edu.cn" }]
+requires-python = ">=3.8"
+
+# Run-time dependencies (same list you had in install_requires)
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "matplotlib",
+  "plotly",
+  "pyGenomeTracks",
+  "scikit-learn",
+  "argcomplete"
+]
+
+# Optional: metadata that shows up nicely on PyPI
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+
+# expose the CLI exactly like you did in setup.py
+[project.scripts]
+localfinder = "localfinder.__main__:main"
+
+# ─── (optional) include non-code files without MANIFEST.in ─────────────
+[tool.setuptools.package-data]
+# ship every *.ini, *.bedgraph etc. inside the package
+"localfinder" = ["*.ini", "*.bedgraph"]
