@@ -1,6 +1,10 @@
 #!/bin/bash
 export PYTHONUNBUFFERED=1
 
+# If there is no zstd tool, install it using conda install -c conda-forge zstd
+zstdcat ../test_data_chr20/track1_chr20.bedgraph.zst > ../test_data_chr20/track1_chr20.bedgraph
+zstdcat ../test_data_chr20/track2_chr20.bedgraph.zst > ../test_data_chr20/track2_chr20.bedgraph
+
 chrom_size="../annotations/hg19.chrom.sizes"
 data_dir="../test_data_chr20"
 result_dir="../result_test_data_chr20_step_by_step"
