@@ -4,16 +4,17 @@ A tool calculating local correlation and enrichment significance of two tracks a
 
 ## Installation Requirements
 
-Before installing and using `localfinder`, please ensure that the following external tools are installed on your system:
+Before installing and using `localfinder`, please ensure that the following external tools are installed on your `$PATH`:
 
 - **bedtools**: Used for genomic interval operations.
   - Installation: [https://bedtools.readthedocs.io/en/latest/content/installation.html](https://bedtools.readthedocs.io/en/latest/content/installation.html)
   - conda install -c bioconda -c conda-forge bedtools 
   - mamba install -c bioconda -c conda-forge bedtools
-- **ucsc-bigwigtobedgraph**: Used for converting BigWig files to BedGraph format.
+- **bigWigToBedGraph (UCSC utility)**: Used for converting BigWig files to BedGraph format.
   - Download: [http://hgdownload.soe.ucsc.edu/admin/exe/](http://hgdownload.soe.ucsc.edu/admin/exe/)
   - conda install -c bioconda -c conda-forge ucsc-bigwigtobedgraph
   - mamba install -c bioconda -c conda-forge ucsc-bigwigtobedgraph
+  - Warning: On Apple Silicon (osx-arm64) Bioconda doesn’t yet build the UCSC “bigWigToBedGraph” utility, so conda/mamba can’t find ucsc-bigwigtobedgraph. localfinder/tests/tools_bigWigToBedGraph_forARM/install_bigWigToBedGraph_forARM64.sh is a shell script to install it.
 - **samtools**: Used for processing SAM/BAM files.
   - Installation: [http://www.htslib.org/download/](http://www.htslib.org/download/)
   - conda install -c bioconda -c conda-forge samtools
