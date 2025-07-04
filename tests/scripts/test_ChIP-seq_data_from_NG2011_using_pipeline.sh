@@ -16,14 +16,14 @@ track_1="${data_dir}/m3134-pDEX-ChIP_allCombined.100.bw"
 track_2="${data_dir}/m3134-DEX-ChIP_allCombined.100.bw"
 
 
-# # After visulaization of the two tracks, we can find that most peaks are sharp peaks and most bins are with low values, so we choose large percentile 90 and binNum_peak as 5 (or 3)
-# localfinder pipeline \
-#     --input_files ${track_1} ${track_2} \
-#     --output_dir  ${result_dir} \
-#     --chrom_sizes $chrom_size \
-#     --bin_size    200 \
-#     --method      locP_and_ES \
-#     --binNum_window 11 --binNum_peak 5 --step 1 \
-#     --percentile 90 --FC_thresh 1.5 \
-#     --p_thresh 0.05 --binNum_thresh 2 \
-#     --chroms chr1 chr2
+# After visulaization of the two tracks, we can find that most peaks are sharp peaks and most bins are with low values, so we choose large percentile 90 and binNum_peak as 5 (or 3)
+localfinder pipeline \
+    --input_files ${track_1} ${track_2} \
+    --output_dir  ${result_dir} \
+    --chrom_sizes $chrom_size \
+    --bin_size    200 \
+    --method      locP_and_ES \
+    --binNum_window 11 --binNum_peak 5 --step 1 \
+    --percentile 90 --FC_thresh 1.5 \
+    --p_thresh 0.05 --binNum_thresh 2 \
+    --chroms chr1 chr2
