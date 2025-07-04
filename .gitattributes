@@ -1,2 +1,4 @@
 tests/test_data_chr20/*.bedgraph filter=lfs diff=lfs merge=lfs -text
 tests/test_data_chr20/*.zst filter=lfs diff=lfs merge=lfs -text
+*.bw filter=lfs diff=lfs merge=lfs -text
+tests/test_ChIP-seq_data_from_NG2011/*.bw.zst filter=lfs diff=lfs merge=lfs -text
