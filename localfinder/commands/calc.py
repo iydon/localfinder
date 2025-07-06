@@ -11,6 +11,7 @@ def main(args):
     track2_file = args.track2
     output_dir = args.output_dir
     method = args.method
+    FDR = args.FDR
     percentile = args.percentile
     bin_number_of_window = args.binNum_window
     bin_number_of_peak = args.binNum_peak
@@ -60,6 +61,7 @@ def main(args):
         FC_thresh            = FC_thresh,
         bin_number_of_peak   = bin_number_of_peak,
         corr_method          = corr_method,
+        FDR                  = FDR,
         output_dir           = output_dir,
         chroms               = chroms
     )

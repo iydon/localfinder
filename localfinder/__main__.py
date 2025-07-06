@@ -72,7 +72,7 @@ def main():
                 localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --method locP_and_ES  --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5 --output_dir ./results --chrom_sizes hg19.chrom.sizes --chroms chr1 chr2
 
             Usage Example 2:
-                localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --method locP_and_ES  --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5  --output_dir ./results --chrom_sizes hg19.chrom.sizes --chroms all
+                localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --method locP_and_ES --FDR --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5  --output_dir ./results --chrom_sizes hg19.chrom.sizes --chroms all
             '''),
         formatter_class=RawDescriptionHelpFormatter  # Preserve formatting
     )
@@ -85,6 +85,7 @@ def main():
         'locS_and_ES',
     ], default='locP_and_ES',  # Set default to one of the aliases
         help='Method for calculate weighted local correlation and enrichment significance (default: locP_and_ES)')
+    parser_calc.add_argument('--FDR', action='store_true', help='Use Benjamini–Hochberg FDR-corrected q-values instead of raw P-values')
     parser_calc.add_argument('--binNum_window', type=int, default=11,
                              help='Number of bins in the sliding window (default: 11).')
     parser_calc.add_argument('--step', type=int, default=1,
@@ -124,9 +125,9 @@ def main():
     parser_find.add_argument("--output_dir", required=True)
     # thresholds
     parser_find.add_argument("--p_thresh", type=float, default=0.05,    ### <<< NEW
-                             help="P-value threshold (default 0.05)")
+                             help="P-value threshold (default: 0.05)")
     parser_find.add_argument("--binNum_thresh", type=int, default=2,    ### <<< NEW
-                             help="Min consecutive significant bins per region")
+                             help="Min consecutive significant bins per region (default: 2)")
     parser_find.add_argument("--chroms", nargs="+", default=["all"])
     parser_find.add_argument("--chrom_sizes", required=True)
     parser_find.set_defaults(func=find_regions_main)
@@ -168,7 +169,7 @@ def main():
                 localfinder pipeline --input_files track1.bedgraph track2.bedgraph --output_dir ../results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --binNum_window 11 --binNum_peak 11 --step 1 --percentile 5 --FC_thresh 1.5 --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2
 
             Usage Example 2:
-                localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ../results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --binNum_window 11 --binNum_peak 11 --step 1 --percentile 5 --FC_thresh 1.5 --p_thresh 0.05 --binNum_thresh 2 --chroms all
+                localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ../results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --FDR --binNum_window 11 --binNum_peak 11 --step 1 --percentile 5 --FC_thresh 1.5 --p_thresh 0.05 --binNum_thresh 2 --chroms all
             '''),
         formatter_class=RawDescriptionHelpFormatter  # Preserve formatting
     )
@@ -179,7 +180,8 @@ def main():
     parser_pipe.add_argument("--bin_size", type=int, default=200)
     # calc options forwarded
     parser_pipe.add_argument("--method", choices=["locP_and_ES", "locS_and_ES"],
-                             default="locP_and_ES")
+                             default="locP_and_ES",help='Method for calculate weighted local correlation and enrichment significance (default: locP_and_ES)')
+    parser_pipe.add_argument('--FDR',action='store_true',help='Use Benjamini–Hochberg FDR-corrected q-values instead of raw P-values')
     parser_pipe.add_argument("--binNum_window", type=int, default=11)
     parser_pipe.add_argument("--binNum_peak",   type=int, default=11)
     parser_pipe.add_argument("--step", type=int, default=1)

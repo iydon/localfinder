@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from scipy.stats import pearsonr, norm, spearmanr
-
+from statsmodels.stats.multitest import multipletests
 
 def check_external_tools():
     required_tools = ['bedtools', 'bigWigToBedGraph', 'samtools']
@@ -218,19 +218,21 @@ def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chroms=
 
 def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         bin_number_of_window=11, step=1, percentile=5, FC_thresh=1.5,
-        bin_number_of_peak=11, corr_method='pearson',
+        bin_number_of_peak=11, corr_method='pearson', FDR=False,
         output_dir='output', chroms=None):
 
     """
     Calculate weighted local correlation and enrichment significance.
-    Writes two bedgraph files: track_hmwC.bedgraph, track_ES.bedgraph.
+    Writes two bedgraph files: track_hmC.bedgraph, track_ES.bedgraph.
     """
 
     print(f"calculate weighted local correlation and enrichment significance "
           f"(corr_method={corr_method})")
     print(f"parameters: percentile={percentile}, FC_thresh={FC_thresh}, "
           f"bin_number_of_window={bin_number_of_window}, "
-          f"bin_number_of_peak={bin_number_of_peak}")
+          f"bin_number_of_peak={bin_number_of_peak}, "
+          f"FDR={'ON' if FDR else 'OFF'}")
+
     EPS = 1e-9
     os.makedirs(output_dir, exist_ok=True)
 
@@ -247,7 +249,7 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
 
     # ---------- output paths -------------------------------------------
     out_ES   = os.path.join(output_dir, 'track_ES.bedgraph')
-    out_hmwC = os.path.join(output_dir, 'track_hmwC.bedgraph')
+    out_hmC = os.path.join(output_dir, 'track_hmC.bedgraph')
 
     half_w = (bin_number_of_window - 1) // 2
     half_p = (bin_number_of_peak   - 1) // 2
@@ -349,7 +351,11 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         SE  = np.sqrt(1/mu1 + 1/mu2 + d1_fl[idx] + d2_fl[idx])        ### <<< CHANGED
         Wald = logFC[idx] / SE
         p    = 2 * (1 - norm.cdf(np.abs(Wald)))
-        lP   = -np.log10(np.where(p == 0, np.nan, p))
+        if FDR:                                         # ── new branch ──
+            q  = multipletests(p, alpha=0.05, method='fdr_bh')[1]
+            lP = -np.log10(np.where(q == 0, np.nan, q))    # log-q
+        else:
+            lP = -np.log10(np.where(p == 0, np.nan, p))    # log-p
 
         # ---------- assemble dataframe ----------
         dfc = df_raw.copy()
@@ -369,11 +375,11 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         df_final = pd.concat([df_final, dfc], ignore_index=True)
 
     # ---------- 3  stack & write  --------------------------------------
-    print("step3: write track_hmwC, track_ES")
+    print("step3: write track_hmC, track_ES")
     df_final['signed_log_Wald_pValue'] = (np.sign(df_final['logFC']) * df_final['log_Wald_pValue'])
-    df_final['hmwC']   = df_final['m_corr'] * df_final['hmw']
+    df_final['hmC']   = df_final['m_corr'] * df_final['hmw']
 
-    df_final[['chr', 'start', 'end', 'hmwC']].to_csv(out_hmwC,sep='\t', header=False, index=False)
+    df_final[['chr', 'start', 'end', 'hmC']].to_csv(out_hmC,sep='\t', header=False, index=False)
     df_final[['chr', 'start', 'end', 'signed_log_Wald_pValue']].to_csv(out_ES,sep='\t', header=False, index=False)
     
     print(f"Saved outputs to {output_dir}")
@@ -523,7 +529,7 @@ def get_plotly_default_colors(num_colors):
 
 def find_significantly_different_regions(
     track_ES_file: str,
-    track_hmwC_file: str,
+    track_hmC_file: str,
     output_dir: str,
     p_thresh: float = 0.05,
     binNum_thresh: int = 2,
@@ -531,13 +537,13 @@ def find_significantly_different_regions(
     chrom_sizes=None
 ):
     """
-    1) Read track_ES.bedgraph and track_hmwC.bedgraph  
+    1) Read track_ES.bedgraph and track_hmC.bedgraph  
     2) Merge on chr/start/end  
     3) Keep bins with abs(ES) >= -log10(p_thresh) AND same sign runs of length>=min_region  
-    4) Write those bins (chr, start, end, ES, hmwC) to '<output_dir>/signif_bins.tsv'  
-    5) Merge adjacent bins into regions (same chr, end==next start), average hmwC across region  
-       and sort descending by avg_hmwC, write to '<output_dir>/signif_regions.tsv'  
-    6) Plot rank vs log(hmwC+1) for those regions, save '<output_dir>/hmwC_rank.png'  
+    4) Write those bins (chr, start, end, ES, hmC) to '<output_dir>/signif_bins.tsv'  
+    5) Merge adjacent bins into regions (same chr, end==next start), average hmC across region  
+       and sort descending by avg_hmC, write to '<output_dir>/signif_regions.tsv'  
+    6) Plot rank vs log(hmC+1) for those regions, save '<output_dir>/hmC_rank.png'  
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -546,8 +552,8 @@ def find_significantly_different_regions(
                         names=['chr','start','end','ES'])
     print(df_es.shape)
     # print(df_es.head())
-    df_c  = pd.read_csv(track_hmwC_file, sep='\t', header=None,
-                        names=['chr','start','end','hmwC'])
+    df_c  = pd.read_csv(track_hmC_file, sep='\t', header=None,
+                        names=['chr','start','end','hmC'])
     print(df_c.shape)
     # print(df_c.head())
     # 2) merge  
@@ -580,11 +586,11 @@ def find_significantly_different_regions(
                     curr = dict(chr=chrom,
                                 start=row.start,
                                 end=row.end,
-                                wvals=[row.hmwC],
+                                wvals=[row.hmC],
                                 count=1)
                 else:
                     curr['end']   = row.end
-                    curr['wvals'].append(row.hmwC)
+                    curr['wvals'].append(row.hmC)
                     curr['count'] += 1
             # last
             if curr and curr['count'] >= binNum_thresh:
@@ -593,28 +599,28 @@ def find_significantly_different_regions(
         df_regs = pd.DataFrame(regs)
         # if no runs passed the threshold, just return empty frame with the right columns
         if df_regs.empty:
-            return pd.DataFrame(columns=['chr','start','end','avg_hmwC'])
-        df_regs['avg_hmwC'] = df_regs['wvals'].apply(np.mean)
-        return df_regs[['chr','start','end','avg_hmwC']]
+            return pd.DataFrame(columns=['chr','start','end','avg_hmC'])
+        df_regs['avg_hmC'] = df_regs['wvals'].apply(np.mean)
+        return df_regs[['chr','start','end','avg_hmC']]
 
     # 4) write bins
     df_pos_sig = df_pos.sort_values(['chr','start'])
     pos_sig_n = df_pos_sig.shape[0]
     pos_bins_out = os.path.join(output_dir, 'pos_signif_bins.tsv')
-    df_pos_sig[['chr','start','end','ES','hmwC']].to_csv(
+    df_pos_sig[['chr','start','end','ES','hmC']].to_csv(
         pos_bins_out, sep='\t', index=False
     )
     print(f"{pos_sig_n} pos ignificant bins written to {pos_bins_out}")
     df_neg_sig = df_neg.sort_values(['chr','start'])
     neg_sig_n = df_neg_sig.shape[0]
     neg_bins_out = os.path.join(output_dir, 'neg_signif_bins.tsv')
-    df_neg_sig[['chr','start','end', 'ES','hmwC']].to_csv(
+    df_neg_sig[['chr','start','end', 'ES','hmC']].to_csv(
         neg_bins_out, sep='\t', index=False
     )
     print(f"{neg_sig_n} neg ignificant bins written to {neg_bins_out}")
 
     # 5) merge regions & write
-    df_pos_regs = _merge_runs(df_pos).sort_values('avg_hmwC', ascending=False)
+    df_pos_regs = _merge_runs(df_pos).sort_values('avg_hmC', ascending=False)
     pos_n = df_pos_regs.shape[0]
     print(pos_n)
     print(df_pos_regs.shape)
@@ -625,7 +631,7 @@ def find_significantly_different_regions(
     print(f"{pos_n} merged pos regions written to {pos_regs_out}")
 
 
-    df_neg_regs = _merge_runs(df_neg).sort_values('avg_hmwC', ascending=False)
+    df_neg_regs = _merge_runs(df_neg).sort_values('avg_hmC', ascending=False)
     neg_n = df_neg_regs.shape[0]
     print(neg_n)
     print(df_neg_regs.shape)
@@ -638,24 +644,24 @@ def find_significantly_different_regions(
     # 6) plot rank vs log(w+1)
     df_pos_regs['rank'] = np.arange(1, len(df_pos_regs)+1)
     plt.figure(figsize=(6,4))
-    plt.plot(df_pos_regs['rank'], np.log(df_pos_regs['avg_hmwC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    plt.plot(df_pos_regs['rank'], np.log(df_pos_regs['avg_hmC']+1), marker='.', linestyle='none',markersize=1, color='k')
     plt.xlabel('Region rank')
-    plt.ylabel('log(hmwC+1)')
-    plt.title('Ranked region hmwC')
+    plt.ylabel('log(hmC+1)')
+    plt.title('Ranked region hmC')
     plt.tight_layout()
-    fig_out = os.path.join(output_dir, 'hmwC_rank_in_pos_regions.png')
+    fig_out = os.path.join(output_dir, 'hmC_rank_in_pos_regions.png')
     plt.savefig(fig_out, dpi=600)
     plt.close()
     print(f"Rank plot of pos regions saved to {fig_out}")
 
     df_neg_regs['rank'] = np.arange(1, len(df_neg_regs)+1)
     plt.figure(figsize=(6,4))
-    plt.plot(df_neg_regs['rank'], np.log(df_neg_regs['avg_hmwC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    plt.plot(df_neg_regs['rank'], np.log(df_neg_regs['avg_hmC']+1), marker='.', linestyle='none',markersize=1, color='k')
     plt.xlabel('Region rank')
-    plt.ylabel('log(hmwC+1)')
-    plt.title('Ranked region hmwC')
+    plt.ylabel('log(hmC+1)')
+    plt.title('Ranked region hmC')
     plt.tight_layout()
-    fig_out = os.path.join(output_dir, 'hmwC_rank_in_neg_regions.png')
+    fig_out = os.path.join(output_dir, 'hmC_rank_in_neg_regions.png')
     plt.savefig(fig_out, dpi=600)
     plt.close()
     print(f"Rank plot of neg regions saved to {fig_out}")

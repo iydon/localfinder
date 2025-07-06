@@ -52,6 +52,7 @@ def run_pipeline(args):
         track2=binned_files[1],
         output_dir=calc_output_dir,
         method=args.method,
+        FDR=args.FDR, 
         percentile=args.percentile,
         binNum_window=args.binNum_window,  ### <<< CHANGED
         step=args.step,
@@ -66,7 +67,7 @@ def run_pipeline(args):
     find_output_dir = os.path.join(args.output_dir, "significant_regions")
     find_args = argparse.Namespace(
         track_E   = os.path.join(calc_output_dir, "track_ES.bedgraph"),   ### FIX
-        track_C   = os.path.join(calc_output_dir, "track_hmwC.bedgraph"), ### FIX
+        track_C   = os.path.join(calc_output_dir, "track_hmC.bedgraph"), ### FIX
         output_dir      = find_output_dir,
         p_thresh        = args.p_thresh,        ### FIX
         binNum_thresh   = args.binNum_thresh,   ### FIX

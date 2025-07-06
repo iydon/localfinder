@@ -40,4 +40,4 @@ localfinder calc --track1 ${bin_track_1} --track2 ${bin_track_2} --output_dir ${
 significant_regions_dir="${result_dir}/significant_regions"
 mkdir -p ${significant_regions_dir}
 
-localfinder findreg --track_E ${correlation_enrichment_dir}/track_ES.bedgraph --track_C ${correlation_enrichment_dir}/track_hmwC.bedgraph --output_dir ${significant_regions_dir} --p_thresh ${p_thresh} --binNum_thresh ${binNum_thresh} --chrom_size ${chrom_size} --chroms chr20
+localfinder findreg --track_E ${correlation_enrichment_dir}/track_ES.bedgraph --track_C ${correlation_enrichment_dir}/track_hmC.bedgraph --output_dir ${significant_regions_dir} --p_thresh ${p_thresh} --binNum_thresh ${binNum_thresh} --chrom_size ${chrom_size} --chroms chr20

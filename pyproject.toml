@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localfinder"
-version = "0.1.18"
-description = "Weighted local correlation & enrichment significance of two genomic tracks"
+version = "0.1.19"
+description = "A tool calculating weighted local correlation and enrichment significance of two tracks and finding significantly different genomic regions."
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Pengfei Yin", email = "12133074@mail.sustech.edu.cn" }]
@@ -15,6 +15,7 @@ requires-python = ">=3.8"
 # Run-time dependencies (same list you had in install_requires)
 dependencies = [
   "numpy",
+  "statsmodels",
   "pandas",
   "scipy",
   "matplotlib",

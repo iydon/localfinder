@@ -7,7 +7,7 @@ zstdcat ../test_ChIP-seq_data_from_NG2011/m3134-DEX-ChIP_allCombined.100.bw.zst 
 
 chrom_size="../annotations/mm10.chrom.sizes"
 data_dir="../test_ChIP-seq_data_from_NG2011"
-result_dir="../test_ChIP-seq_data_from_NG2011_using_pipeline"
+result_dir="../result_ChIP-seq_data_from_NG2011_using_pipeline"
 
 method="locP_and_ES"
 

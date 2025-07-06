@@ -63,7 +63,9 @@ localfinder bin -h
 localfinder calc -h
 ```
 
-    usage: localfinder calc [-h] --track1 TRACK1 --track2 TRACK2 --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES --method {locP_and_ES,locS_and_ES} [--bin_size BIN_SIZE] [--binNum_window BIN_NUM_WINDOW]  [--step STEP] [--binNum_peak BIN_NUM_PEAK] [--FC_thresh FC_THRESH] [--percentile PERCENTILE]  [--chroms CHROMS [CHROMS ...]]
+    usage: localfinder calc [-h] --track1 TRACK1 --track2 TRACK2 [--method {locP_and_ES,locS_and_ES}] [--FDR] [--binNum_window BINNUM_WINDOW] [--step STEP]
+                        [--percentile PERCENTILE] [--binNum_peak BINNUM_PEAK] [--FC_thresh FC_THRESH] --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES
+                        [--chroms CHROMS [CHROMS ...]]
     
     Calculate local correlation and enrichment significance between two BedGraph tracks.
     
@@ -73,7 +75,8 @@ localfinder calc -h
     --track2 TRACK2                                     `Second input BedGraph file` 
     --output_dir OUTPUT_DIR                             `Output directory` 
     --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`
-    --method {locP_and_ES,locP_and_ES}                  `Methods for calculate weighted local correlation and enrichment significance (default: locP_and_ES). P: pearson correlation; S: spearman correlation`   
+    --method {locP_and_ES,locP_and_ES}                  `Methods for calculate weighted local correlation and enrichment significance (default: locP_and_ES). P: pearson correlation; S: spearman correlation`  
+    --FDR                                               `Use Benjamini–Hochberg FDR-corrected q-values instead of raw P-values` 
     --bin_size BIN_SIZE                                 `Size of each bin (default: 200)` 
     --binNum_window BIN_NUM_WINDOW                      `Number of bins in the sliding window (default: 11)`  
     --step STEP                                         `Step size for the sliding window (default: 1)`  
@@ -86,7 +89,7 @@ localfinder calc -h
         localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --output_dir ./calc_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES  --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --output_dir ./calc_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES  --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5 --chroms all
+        localfinder calc --track1 track1.bedgraph --track2 track2.bedgraph --output_dir ./calc_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES --FDR --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 11 --FC_thresh 1.5 --percentile 5 --chroms all
 
 ### findreg
 ```bash
@@ -108,16 +111,18 @@ localfinder findreg -h
 
     
     Usage Example 1:
-        localfinder findreg --track_E track_ES.bedgraph --track_C track_hmwC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2
+        localfinder findreg --track_E track_ES.bedgraph --track_C track_hmC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder findreg --track_E track_ES.bedgraph --track_C track_hmwC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes --p_thresh 0.05 --binNum_thresh 2 --chroms all
+        localfinder findreg --track_E track_ES.bedgraph --track_C track_hmC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes --p_thresh 0.05 --binNum_thresh 2 --chroms all
 
 ### pipeline
 ```bash
 localfinder pipeline -h
 ```
-    usage: localfinder pipeline [-h] --input_files INPUT_FILES [INPUT_FILES ...] --output_dir OUTPUT_DIR --chrom_sizes CHROM_SIZES --method {locP_and_ES,locS_and_ES} [--bin_size BIN_SIZE] [--binNum_window BIN_NUM_WINDOW] [--step STEP] [--binNum_peak BIN_NUM_PEAK] [--FC_thresh FC_THRESH] [--percentile PERCENTILE] [--binNum_thresh BINNUM_THRESH] [--chroms CHROMS [CHROMS ...]]
+    usage: localfinder pipeline [-h] --input_files INPUT_FILES [INPUT_FILES ...] [--output_dir OUTPUT_DIR] --chrom_sizes CHROM_SIZES [--bin_size BIN_SIZE]
+                            [--method {locP_and_ES,locS_and_ES}] [--FDR] [--binNum_window BINNUM_WINDOW] [--binNum_peak BINNUM_PEAK] [--step STEP] [--percentile PERCENTILE]
+                            [--FC_thresh FC_THRESH] [--p_thresh P_THRESH] [--binNum_thresh BINNUM_THRESH] [--chroms CHROMS [CHROMS ...]]
     
     Run all steps of the localfinder pipeline sequentially.
     
@@ -126,7 +131,8 @@ localfinder pipeline -h
     --input_files INPUT_FILES [INPUT_FILES ...]         `Input BigWig files to process`  
     --output_dir OUTPUT_DIR                             `Output directory for all results`  
     --chrom_sizes CHROM_SIZES                           `Path to the chromosome sizes file`   
-    --method {locP_and_ES,locS_and_ES}                  `Method for calculate local correlation and enrichment significance (default: locP_and_ES)`  
+    --method {locP_and_ES,locS_and_ES}                  `Method for calculate local correlation and enrichment significance (default: locP_and_ES)` 
+    --FDR                                               `Use Benjamini–Hochberg FDR-corrected q-values instead of raw P-values`
     --bin_size BIN_SIZE                                 `Size of each bin for binning tracks (default: 200bp)` 
     --binNum_window BIN_NUM_WINDOW                      `Number of bins in the sliding window (default: 11)`  
     --step STEP                                         `Step size for the sliding window (default: 1)`  
@@ -142,7 +148,7 @@ localfinder pipeline -h
         localfinder pipeline --input_files track1.bedgraph track2.bedgraph --output_dir ./pipeline_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 5 --FC_thresh 1.5 --percentile 5 --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2
     
     Usage Example 2:
-        localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ./pipeline_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 5 --FC_thresh 1.5 --percentile 5 --p_thresh 0.05 --binNum_thresh 2 --chroms all
+        localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ./pipeline_out --chrom_sizes hg19.chrom.sizes --method locP_and_ES --FDR --bin_size 200 --binNum_window 11 --step 1 --binNum_peak 5 --FC_thresh 1.5 --percentile 5 --p_thresh 0.05 --binNum_thresh 2 --chroms all
 
 ### viz
 ```bash
