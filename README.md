@@ -187,7 +187,7 @@ pip install localfinder
 
 Download the souce code of [localfinder](https://github.com/astudentfromsustech/localfinder)  
 ```bash
-git clone git@github.com:astudentfromsustech/localfinder.git
+git clone https://github.com/astudentfromsustech/localfinder.git
 ```
 
 Run the examples under localfinder/tests/ (scripts have been preprared in tests folder)  
