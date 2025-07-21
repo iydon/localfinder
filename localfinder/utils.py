@@ -41,71 +41,67 @@ def get_chromosomes_from_chrom_sizes(chrom_sizes_file):
         print(f"Error reading chromosome sizes file {chrom_sizes_file}: {e}")
         sys.exit(1)
         
-def process_and_bin_file(input_file, output_file, bin_size, chrom_sizes, chroms=None):
+def process_and_bin_file(input_file, output_file, bin_size, chrom_sizes, chrom):
     """
     Processes an input file by detecting its format, converting it to BedGraph if necessary,
-    and binning it into fixed-size bins. All intermediate files are handled in a temporary directory.
-    """
-    # Create a temporary directory for processing
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_bedgraph = os.path.join(temp_dir, 'temp.bedgraph')
+    and binning it into fixed-size bins for a single chromosome.
 
-        # Detect the format based on the file extension
+    Parameters
+    ----------
+    input_file : str
+        Path to the input BigWig or BedGraph file.
+    output_file : str
+        Path for the final binned BedGraph file.
+    bin_size : int
+        Bin size in base pairs.
+    chrom_sizes : str
+        Path to the chromosome-sizes file (2-column TSV).
+    chrom : str
+        Chromosome to process (e.g. 'chr1').
+    """
+    import shutil
+
+    print(f"[START] {chrom}: processing {os.path.basename(input_file)}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_bedgraph = os.path.join(temp_dir, "temp.bedgraph")
+
         input_format = detect_format(input_file)
         if input_format is None:
             print(f"Could not determine the format of the file: {input_file}")
             sys.exit(1)
 
         try:
-            # Convert input to BedGraph if necessary
-            if input_format == 'bigwig':
-                if chroms:
-                    # Process each chromosome separately
-                    temp_bedgraph_files = []
-                    for chrom in chroms:
-                        temp_bedgraph_chrom = os.path.join(temp_dir, f'temp_{chrom}.bedgraph')
-                        # Check the chromosome format by printing
-                        print(f"Processing chromosome: {chrom}")
-                        cmd = ['bigWigToBedGraph', '-chrom=' + chrom, input_file, temp_bedgraph_chrom]
-                        subprocess.run(cmd, check=True)
-                        temp_bedgraph_files.append(temp_bedgraph_chrom)
-
-                    # Concatenate the per-chromosome bedgraph files into one
-                    with open(temp_bedgraph, 'w') as outfile:
-                        for fname in temp_bedgraph_files:
-                            with open(fname) as infile:
-                                outfile.write(infile.read())
-                else:
-                    # Process the entire file if no chroms specified
-                    cmd = ['bigWigToBedGraph', input_file, temp_bedgraph]
-                    subprocess.run(cmd, check=True)
-
-            elif input_format == 'bedgraph':
-                # Copy input to temporary BedGraph file
-                subprocess.run(['cp', input_file, temp_bedgraph], check=True)
-
+            # ------------------------------------------------------------------
+            # 1. Convert to BedGraph (single chromosome)
+            # ------------------------------------------------------------------
+            if input_format == "bigwig":
+                subprocess.run(
+                    ["bigWigToBedGraph", f"-chrom={chrom}", input_file, temp_bedgraph],
+                    check=True,
+                )
+            elif input_format == "bedgraph":
+                with open(input_file) as inp, open(temp_bedgraph, "w") as outp:
+                    for line in inp:
+                        if line.startswith(f"{chrom}\t"):
+                            outp.write(line)
+                if os.path.getsize(temp_bedgraph) == 0:
+                    print(f"No data for chromosome {chrom} in {input_file}")
+                    sys.exit(1)
             else:
                 print(f"Unsupported format: {input_format}")
                 sys.exit(1)
 
-            # Ensure the BedGraph file contains both chromosomes
-            with open(temp_bedgraph, 'r') as temp_file:
-                temp_data = temp_file.readlines()
-
-            # Check if both chromosomes appear in the file
-            found_chroms = set()
-            for line in temp_data:
-                chrom = line.split('\t')[0]
-                found_chroms.add(chrom)
-
-            print(f"Chromosomes found in {input_file}: {found_chroms}")
-
-            # Bin the BedGraph data
-            bin_bedgraph(temp_bedgraph, output_file, bin_size, chrom_sizes, chroms)
+            # ------------------------------------------------------------------
+            # 2. Bin the BedGraph data
+            # ------------------------------------------------------------------
+            print(f"[INFO] Binning {chrom} at {bin_size}-bp resolution")
+            bin_bedgraph(temp_bedgraph, output_file, bin_size, chrom_sizes, chrom)
 
         finally:
-            # Temporary directory and files are automatically cleaned up
-            pass
+            # Temporary directory and its contents are deleted automatically
+            print(f"[DONE] {chrom}: intermediate files cleaned up")
+
 
 
 def detect_format(filename):
@@ -131,100 +127,86 @@ def detect_format(filename):
         return None
 
 
-def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chroms=None):
+def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chrom):
     """
-    Bins the BedGraph data into fixed-size bins, replacing missing values with zero.
-    Intermediate files are stored in a temporary directory that is deleted after processing.
-
-    Parameters:
-    - input_bedgraph (str): Path to the input BedGraph file.
-    - output_bedgraph (str): Path to the output binned BedGraph file.
-    - bin_size (int): Size of the bins in base pairs.
-    - chrom_sizes (str): Path to the chromosome sizes file.
-    - chroms (list): List of chromosomes to process. If None, all chromosomes are processed.
+    Bins BedGraph data for a single chromosome into fixed-size bins,
+    replacing missing values with zero.  Windows produced by
+    `bedtools makewindows` are already coordinate-sorted, so no extra sort
+    is run on them; we still sort the BedGraph itself for safety.
     """
-    # Create a temporary directory
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Define paths for temporary files inside the temp directory
-        temp_bins = os.path.join(temp_dir, 'temp_bins.bed')
-        temp_bins_filtered = os.path.join(temp_dir, 'temp_bins_filtered.bed')
-        temp_bins_sorted = os.path.join(temp_dir, 'temp_bins_sorted.bed')
-        temp_bedgraph_sorted = os.path.join(temp_dir, 'temp_bedgraph_sorted.bedgraph')
-        temp_bedgraph_filtered = os.path.join(temp_dir, 'temp_bedgraph_filtered.bedgraph')
-        temp_binned = os.path.join(temp_dir, 'temp_binned.bedgraph')
+        # --------------------------------------------------------------
+        # 1. Tiny genome file for the target chromosome
+        # --------------------------------------------------------------
+        temp_genome = os.path.join(temp_dir, "temp_genome.txt")
+        df_sizes = pd.read_csv(chrom_sizes, sep="\t", header=None,
+                               names=["chrom", "size"])
+        row = df_sizes[df_sizes["chrom"] == chrom]
+        if row.empty:
+            print(f"Chromosome {chrom} not found in {chrom_sizes}")
+            sys.exit(1)
+        with open(temp_genome, "w") as g:
+            g.write(f"{chrom}\t{int(row.iloc[0]['size'])}\n")
 
-        # Use bedtools makewindows to create fixed-size bins
-        with open(temp_bins, 'w') as f_bins:
-            subprocess.run(['bedtools', 'makewindows', '-g', chrom_sizes, '-w', str(bin_size)],
-                           stdout=f_bins, check=True)
+        # Temporary paths
+        temp_bins      = os.path.join(temp_dir, "temp_bins.bed")
+        temp_bg_sorted = os.path.join(temp_dir, "temp_bedgraph_sorted.bedgraph")
+        temp_binned    = os.path.join(temp_dir, "temp_binned.bedgraph")
 
-        # Filter bins to specified chromosomes if chroms is provided
-        if chroms:
-            df_bins = pd.read_csv(temp_bins, sep='\t', header=None, names=['chrom', 'start', 'end'])
-            df_bins = df_bins[df_bins['chrom'].isin(chroms)]
-            if df_bins.empty:
-                print(f"No bins found for the specified chromosomes: {chroms}")
-                sys.exit(1)
-            df_bins.to_csv(temp_bins_filtered, sep='\t', header=False, index=False)
-        else:
-            temp_bins_filtered = temp_bins
+        # --------------------------------------------------------------
+        # 2. Generate fixed-size windows (already sorted)
+        # --------------------------------------------------------------
+        with open(temp_bins, "w") as f_bins:
+            subprocess.run(
+                ["bedtools", "makewindows", "-g", temp_genome, "-w", str(bin_size)],
+                stdout=f_bins, check=True
+            )
 
-        # Sort temp_bins_filtered.bed
-        with open(temp_bins_sorted, 'w') as f_bins_sorted:
-            subprocess.run(['bedtools', 'sort', '-faidx', chrom_sizes, '-i', temp_bins_filtered],
-                           stdout=f_bins_sorted, check=True)
+        # --------------------------------------------------------------
+        # 3. Coordinate-sort the BedGraph
+        # --------------------------------------------------------------
+        with open(temp_bg_sorted, "w") as f_bg_sorted:
+            subprocess.run(
+                ["bedtools", "sort", "-faidx", temp_genome, "-i", input_bedgraph],
+                stdout=f_bg_sorted, check=True
+            )
 
-        # Sort input_bedgraph
-        with open(temp_bedgraph_sorted, 'w') as f_bedgraph_sorted:
-            subprocess.run(['bedtools', 'sort', '-faidx', chrom_sizes, '-i', input_bedgraph],
-                           stdout=f_bedgraph_sorted, check=True)
+        # --------------------------------------------------------------
+        # 4. Map values onto bins (`-sorted` because both inputs are sorted)
+        # --------------------------------------------------------------
+        with open(temp_binned, "w") as f_binned:
+            subprocess.run(
+                ["bedtools", "map", "-sorted",
+                 "-a", temp_bins,
+                 "-b", temp_bg_sorted,
+                 "-c", "4", "-o", "mean"],
+                stdout=f_binned, check=True
+            )
 
-        # Filter input_bedgraph_sorted to specified chromosomes if chroms is provided
-        if chroms:
-            df_bedgraph = pd.read_csv(temp_bedgraph_sorted, sep='\t', header=None,
-                                      names=['chrom', 'start', 'end', 'value'])
-            df_bedgraph = df_bedgraph[df_bedgraph['chrom'].isin(chroms)]
-            df_bedgraph.to_csv(temp_bedgraph_filtered, sep='\t', header=False, index=False)
-            bedgraph_input = temp_bedgraph_filtered
-        else:
-            bedgraph_input = temp_bedgraph_sorted
-
-        # Map the BedGraph data to the bins
-        with open(temp_binned, 'w') as f_binned:
-            subprocess.run(['bedtools', 'map', '-a', temp_bins_sorted, '-b', bedgraph_input,
-                            '-c', '4', '-o', 'mean'], stdout=f_binned, check=True)
-
-        # Read the binned data, specifying na_values
+        # --------------------------------------------------------------
+        # 5. Fill missing values with zero and save
+        # --------------------------------------------------------------
         df = pd.read_csv(
-            temp_binned,
-            sep='\t',
-            header=None,
-            names=['chrom', 'start', 'end', 'value'],
-            na_values='.'
+            temp_binned, sep="\t", header=None,
+            names=["chrom", "start", "end", "value"], na_values="."
         )
-
-        # Replace NaN values with zero
-        df['value'] = df['value'].fillna(0)
-
-        # Convert 'value' column to float
-        df['value'] = df['value'].astype(float)
-
-        # Save the binned BedGraph file
-        df.to_csv(output_bedgraph, sep='\t', header=False, index=False)
-
-        # The temporary directory and all its contents are deleted here
+        df["value"] = df["value"].fillna(0).astype(float)
+        df.to_csv(output_bedgraph, sep="\t", header=False, index=False)
+        print(f"[SUCCESS] ({chrom}) Saved {output_bedgraph}")
 
 
 
 def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
-        bin_number_of_window=11, step=1, percentile=5, FC_thresh=1.5,
-        bin_number_of_peak=11, corr_method='pearson', FDR=False,
-        output_dir='output', chroms=None):
+        bin_number_of_window=11, step=1, percentile=5, percentile_mode='all', FC_thresh=1.5,
+        bin_number_of_peak=11, norm_method='scale', corr_method='pearson', FDR=False,
+        output_dir='output', chrom=None):
 
     """
     Calculate weighted local correlation and enrichment significance.
     Writes two bedgraph files: track_hmC.bedgraph, track_ES.bedgraph.
     """
+    if chrom is None:                                   
+        raise ValueError("Argument 'chrom' (e.g. 'chr1') must be provided")
 
     print(f"calculate weighted local correlation and enrichment significance "
           f"(corr_method={corr_method})")
@@ -237,142 +219,200 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     os.makedirs(output_dir, exist_ok=True)
 
     # ---------- 1  global normalisation ---------------------------------
-    print("step1: global normalisation")
+    print(f"step1: global normalisation ({norm_method})")
     cov1, cov2 = df[column1].sum(), df[column2].sum()
-    if cov1 and cov2:
-        if cov1 > cov2:
-            df[column1] *= cov2 / cov1
-            print(f"Scaled {column1} down to match {column2}")
-        else:
-            df[column2] *= cov1 / cov2
-            print(f"Scaled {column2} down to match {column1}")
+    if norm_method == 'scale':
+        # existing “match smaller total” behavior
+        if cov1 and cov2:
+            if cov1 > cov2:
+                df[column1] *= cov2 / cov1
+                print(f"Scaled {column1} down to match {column2}")
+            else:
+                df[column2] *= cov1 / cov2
+                print(f"Scaled {column2} down to match {column1}")
+    elif norm_method == 'cpm':
+        # counts per million: each column → counts / (total/1e6)
+        if cov1 > 0:
+            df[column1] = df[column1] * 1e6 / cov1
+        if cov2 > 0:
+            df[column2] = df[column2] * 1e6 / cov2
+        print(f"Converted {column1} and {column2} to CPM")
+    else:
+        raise ValueError(f"Unknown norm_method: {norm_method}")
+
 
     # ---------- output paths -------------------------------------------
-    out_ES   = os.path.join(output_dir, 'track_ES.bedgraph')
-    out_hmC = os.path.join(output_dir, 'track_hmC.bedgraph')
+    out_ES   = os.path.join(output_dir, f'track_ES.{chrom}.bedgraph')
+    out_hmC = os.path.join(output_dir, f'track_hmC.{chrom}.bedgraph')
 
     half_w = (bin_number_of_window - 1) // 2
     half_p = (bin_number_of_peak   - 1) // 2
-    chromosomes = chroms if chroms else df['chr'].unique()
+
 
     df_final = pd.DataFrame()
 
     # ===================================================================
     # per-chromosome processing
     # ===================================================================
-    print("step2: calculate weighted correlation and ES per chromosome")
-    for chrom in chromosomes:
-        df_raw = df[df['chr'] == chrom].reset_index(drop=True)           # raw (no floor)
-        n = len(df_raw)
-        if n == 0:
-            print(f"No data for {chrom}, skipping")
-            continue
+    print("step2: calculate weighted correlation and ES")
+    df_raw = df[df['chr'] == chrom].reset_index(drop=True)             # --- CHANGED ---
+    n = len(df_raw)
+    if n == 0:
+        print(f"[WARN] No data for {chrom}; nothing written")
+        return
 
-        print(f"\nProcessing {chrom}: {n} bins")
-        print(f"  half_window = {half_w}, half_peak = {half_p}")
+    print(f"\nProcessing {chrom}: {n} bins")
+    print(f"  half_window = {half_w}, half_peak = {half_p}")
 
-        # 2·1  percentile floor (only for ES)
-        all_vals = pd.concat([df_raw[column1], df_raw[column2]])
-        nz = all_vals[all_vals > 0]
-        pct = np.percentile(nz, percentile) if len(nz) else 0
-        print(f"  {percentile}th percentile in non-zero bins = {pct:.4f}")
-
-        df_floor = df_raw.copy()                                         ### floor
-        mask = (df_floor[column1] <= pct) & (df_floor[column2] <= pct)
-        df_floor.loc[mask, [column1, column2]] = pct 
-        df_floor[column1] = df_floor[column1].astype('float64')
-        df_floor[column2] = df_floor[column2].astype('float64')
-
-        # 2·2  sliding-window statistics  (use *raw* data!)
-        corr    = np.zeros(n)
-        m_corr = np.zeros(n)
-        hmw = np.zeros(n)
-
-        m1_raw  = np.zeros(n); m2_raw  = np.zeros(n)    ### <<< CHANGED
-
-        # floored parameters for logFC in peak region
-        mES1_fl = np.zeros(n); mES2_fl = np.zeros(n)
-        # floored parameters for SE in window region
-        m1_fl = np.zeros(n);  m2_fl = np.zeros(n)                   ### <<< CHANGED
-        v1_fl = np.zeros(n);  v2_fl = np.zeros(n)                   ### <<< CHANGED
-        d1_fl = np.zeros(n);  d2_fl = np.zeros(n)                   ### <<< CHANGED
-
-        print(f"Step2.2: calculate weighted local correlation ({corr_method})"
-              f" and ES (window={bin_number_of_window}, step={step})")
-        for i in range(half_w, n-half_w, step):
-            # ---------- correlation window ----------  (RAW)  ###
-            w1 = df_raw[column1].iloc[i-half_w : i+half_w+1]            ### <<< CHANGED (no-floor)
-            w2 = df_raw[column2].iloc[i-half_w : i+half_w+1]            ### <<< CHANGED (no-floor)
-
-            if len(set(w1)) > 1 and len(set(w2)) > 1:
-                if corr_method == 'pearson':
-                    r, _ = pearsonr(w1, w2)
-                    corr[i] = max(r, 0)
-                elif corr_method == 'spearman':
-                    r, _ = spearmanr(w1, w2)
-                    corr[i] = max(r, 0)
-                else:
-                    raise ValueError(f"Unknown corr_method: {corr_method}")
-
-            m1_raw[i], m2_raw[i] = w1.mean(), w2.mean()
-            hmw[i]  = (m1_raw[i]*m2_raw[i])/(m1_raw[i]+m2_raw[i]+EPS)
-
-            # SE in window
-            wf1 = df_floor[column1].iloc[i-half_w : i+half_w+1]
-            wf2 = df_floor[column2].iloc[i-half_w : i+half_w+1]
-
-            m1_fl[i], m2_fl[i] = wf1.mean(), wf2.mean()               ### <<< CHANGED
-            v1_fl[i], v2_fl[i] = wf1.var(ddof=0), wf2.var(ddof=0)     ### <<< CHANGED
-            d1_fl[i] = max((v1_fl[i] - m1_fl[i])/(m1_fl[i]**2 + EPS), 0)  ### <<< CHANGED
-            d2_fl[i] = max((v2_fl[i] - m2_fl[i])/(m2_fl[i]**2 + EPS), 0)  ### <<< CHANGED
-          
-
-            # ---------- logFC in peak region ----------  (FLOORED)  ###
-            p1 = df_floor[column1].iloc[i-half_p : i+half_p+1]          ### <<< CHANGED (no-floor)
-            p2 = df_floor[column2].iloc[i-half_p : i+half_p+1]          ### <<< CHANGED (no-floor)
-            mES1_fl[i], mES2_fl[i] = p1.mean(), p2.mean()
-
-        # 2·3  calculate mean correlation
-        for i in range(half_w, n-half_w, step):
-            local_c = corr[i-half_w : i+half_w+1]
-            m_corr[i] = local_c.mean()
+     # 2·1  percentile floor (only for ES)
+    all_vals = pd.concat([df_raw[column1], df_raw[column2]])
+    if percentile_mode == 'nonzero':
+        vals = all_vals[all_vals > 0]
+    else:
+        vals = all_vals
+    if len(vals):
+        pct = np.percentile(vals, percentile)
+    else:
+        pct = 0.0
+    print(f"  {percentile}th percentile over "
+          f"{'non-zero' if percentile_mode=='nonzero' else 'all'} bins = {pct:.4f}")
 
 
-        # ---------- logFC in peak region -----------------------------
-        safe1 = np.maximum(mES1_fl, pct)
-        safe2 = np.maximum(mES2_fl, pct)
-        logFC = np.log(safe2 / (safe1 + EPS)) / np.log(FC_thresh)
-        logFC[:half_w]  = 0.0
-        logFC[-half_w:] = 0.0
+    df_floor = df_raw.copy()                                         ### floor
+    mask = (df_floor[column1] <= pct) & (df_floor[column2] <= pct)
+    df_floor.loc[mask, [column1, column2]] = pct 
+    df_floor[column1] = df_floor[column1].astype('float64')
+    df_floor[column2] = df_floor[column2].astype('float64')
 
-        idx = np.arange(half_w, n-half_w, step)
-        mu1 = np.maximum(m1_fl[idx], pct)                 
-        mu2 = np.maximum(m2_fl[idx], pct)
-        SE  = np.sqrt(1/mu1 + 1/mu2 + d1_fl[idx] + d2_fl[idx])        ### <<< CHANGED
-        Wald = logFC[idx] / SE
-        p    = 2 * (1 - norm.cdf(np.abs(Wald)))
-        if FDR:                                         # ── new branch ──
-            q  = multipletests(p, alpha=0.05, method='fdr_bh')[1]
-            lP = -np.log10(np.where(q == 0, np.nan, q))    # log-q
-        else:
-            lP = -np.log10(np.where(p == 0, np.nan, p))    # log-p
+        # ---------- 2·2  sliding-window statistics (REFINED) -----------------
+    print(f"Step2.2: calculate weighted local correlation ({corr_method}) "
+          f"and ES (window={bin_number_of_window}, step={step})")
 
-        # ---------- assemble dataframe ----------
-        dfc = df_raw.copy()
-        dfc['corr']        = corr
-        dfc['m_corr']      = m_corr
-        dfc['hmw']         = hmw
-        dfc['logFC']       = logFC
-        dfc['SE'] = 0.0
-        dfc['Wald']            = 0.0
-        dfc['Wald_pValue']     = 0.0
-        dfc['log_Wald_pValue'] = 0.0
-        dfc.loc[idx, 'SE']            = SE
-        dfc.loc[idx, 'Wald']          = Wald
-        dfc.loc[idx, 'Wald_pValue']   = p
-        dfc.loc[idx, 'log_Wald_pValue'] = np.nan_to_num(lP, nan=0.0)
+    W = 2 * ((bin_number_of_window - 1) // 2) + 1   # full window length
+    P = 2 * ((bin_number_of_peak   - 1) // 2) + 1   # peak window length
+    EPS = 1e-9
 
-        df_final = pd.concat([df_final, dfc], ignore_index=True)
+    # Convert to NumPy arrays once
+    x  = df_raw[column1].to_numpy(float)
+    y  = df_raw[column2].to_numpy(float)
+    xf = df_floor[column1].to_numpy(float)
+    yf = df_floor[column2].to_numpy(float)
+
+    # Prefix sums (pad with leading zero for easier slicing)
+    sx   = np.concatenate(([0.0], x.cumsum()))
+    sy   = np.concatenate(([0.0], y.cumsum()))
+    sxy  = np.concatenate(([0.0], (x * y).cumsum()))
+    sx2  = np.concatenate(([0.0], (x * x).cumsum()))
+    sy2  = np.concatenate(([0.0], (y * y).cumsum()))
+
+    sxf  = np.concatenate(([0.0], xf.cumsum()))
+    syf  = np.concatenate(([0.0], yf.cumsum()))
+    sx2f = np.concatenate(([0.0], (xf * xf).cumsum()))
+    sy2f = np.concatenate(([0.0], (yf * yf).cumsum()))
+
+    # Allocate result arrays (same names as before)
+    corr    = np.zeros(n, float)
+    m_corr  = np.zeros(n, float)
+    hmw     = np.zeros(n, float)
+
+    m1_raw  = np.zeros(n, float)
+    m2_raw  = np.zeros(n, float)
+
+    mES1_fl = np.zeros(n, float)
+    mES2_fl = np.zeros(n, float)
+
+    m1_fl = np.zeros(n, float)
+    m2_fl = np.zeros(n, float)
+    v1_fl = np.zeros(n, float)
+    v2_fl = np.zeros(n, float)
+    d1_fl = np.zeros(n, float)
+    d2_fl = np.zeros(n, float)
+
+    # Helper: prefix-sum slice mean / var
+    def box_mean(pref, lo, hi, L):
+        return (pref[hi] - pref[lo]) / L
+
+    def box_var(pref, pref2, lo, hi, L, mean):
+        return (pref2[hi] - pref2[lo]) / L - mean * mean
+
+    half_w = (bin_number_of_window - 1) // 2
+    half_p = (bin_number_of_peak   - 1) // 2
+
+    for i in range(half_w, n - half_w, step):
+        lo_w = i - half_w
+        hi_w = i + half_w + 1
+        lo_p = i - half_p
+        hi_p = i + half_p + 1
+
+        # RAW means & variances for correlation window
+        mx  = box_mean(sx,  lo_w, hi_w, W)
+        my  = box_mean(sy,  lo_w, hi_w, W)
+        vx  = box_var(sx,  sx2,  lo_w, hi_w, W, mx)
+        vy  = box_var(sy,  sy2,  lo_w, hi_w, W, my)
+        cxy = box_mean(sxy, lo_w, hi_w, W) - mx * my
+
+        if vx > 0 and vy > 0:
+            r = cxy / np.sqrt(vx * vy)
+            corr[i] = max(r, 0.0)
+
+        m1_raw[i], m2_raw[i] = mx, my
+        hmw[i] = (mx * my) / (mx + my + EPS)
+
+        # FLOORED means / vars in same window (for SE)
+        m1f = box_mean(sxf, lo_w, hi_w, W)
+        m2f = box_mean(syf, lo_w, hi_w, W)
+        v1f = box_var(sxf, sx2f, lo_w, hi_w, W, m1f)
+        v2f = box_var(syf, sy2f, lo_w, hi_w, W, m2f)
+
+        m1_fl[i], m2_fl[i] = m1f, m2f
+        v1_fl[i], v2_fl[i] = v1f, v2f
+        d1_fl[i] = max((v1f - m1f) / (m1f ** 2 + EPS), 0.0)
+        d2_fl[i] = max((v2f - m2f) / (m2f ** 2 + EPS), 0.0)
+
+        # FLOORED means in peak region
+        mES1_fl[i] = box_mean(sxf, lo_p, hi_p, P)
+        mES2_fl[i] = box_mean(syf, lo_p, hi_p, P)
+
+    # 2·3  calculate mean correlation
+    for i in range(half_w, n-half_w, step):
+        m_corr[i] = corr[i-half_w : i+half_w+1].mean()
+
+
+    # ---------- logFC in peak region -----------------------------
+    safe1 = np.maximum(mES1_fl, pct)
+    safe2 = np.maximum(mES2_fl, pct)
+    logFC = np.log(safe2 / (safe1 + EPS)) / np.log(FC_thresh)
+    logFC[:half_w]  = 0.0
+    logFC[-half_w:] = 0.0
+
+    idx = np.arange(half_w, n-half_w, step)
+    mu1 = np.maximum(m1_fl[idx], pct)                 
+    mu2 = np.maximum(m2_fl[idx], pct)
+    SE  = np.sqrt(1/mu1 + 1/mu2 + d1_fl[idx] + d2_fl[idx])        ### <<< CHANGED
+    Wald = logFC[idx] / SE
+    p    = 2 * (1 - norm.cdf(np.abs(Wald)))
+    if FDR:                                         # ── new branch ──
+        q  = multipletests(p, alpha=0.05, method='fdr_bh')[1]
+        lP = -np.log10(np.where(q == 0, np.nan, q))    # log-q
+    else:
+        lP = -np.log10(np.where(p == 0, np.nan, p))    # log-p
+
+    # ---------- assemble dataframe ----------
+    dfc = df_raw.copy()
+    dfc['corr']        = corr
+    dfc['m_corr']      = m_corr
+    dfc['hmw']         = hmw
+    dfc['logFC']       = logFC
+    dfc['SE'] = 0.0
+    dfc['Wald']            = 0.0
+    dfc['Wald_pValue']     = 0.0
+    dfc['log_Wald_pValue'] = 0.0
+    dfc.loc[idx, 'SE']            = SE
+    dfc.loc[idx, 'Wald']          = Wald
+    dfc.loc[idx, 'Wald_pValue']   = p
+    dfc.loc[idx, 'log_Wald_pValue'] = np.nan_to_num(lP, nan=0.0)
+
+    df_final = dfc 
 
     # ---------- 3  stack & write  --------------------------------------
     print("step3: write track_hmC, track_ES")
@@ -382,7 +422,7 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     df_final[['chr', 'start', 'end', 'hmC']].to_csv(out_hmC,sep='\t', header=False, index=False)
     df_final[['chr', 'start', 'end', 'signed_log_Wald_pValue']].to_csv(out_ES,sep='\t', header=False, index=False)
     
-    print(f"Saved outputs to {output_dir}")
+    print(f"Saved outputs to {out_hmC} and {out_ES}")
 
 
 

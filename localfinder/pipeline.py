@@ -1,6 +1,6 @@
 # File: pipeline.py
 
-import argparse, os, sys
+import argparse, os, sys, shutil
 from localfinder.commands.bin import main as bin_tracks_main
 from localfinder.commands.calc import main as calc_corr_main
 from localfinder.commands.findreg import main as find_regions_main  
@@ -17,17 +17,18 @@ def run_pipeline(args):
         output_dir=bin_output_dir,
         bin_size=args.bin_size,
         chrom_sizes=args.chrom_sizes,
-        chroms=args.chroms
+        chroms=args.chroms,
+        threads=args.threads
     )
     bin_tracks_main(bin_args)
 
-    # Step 2: Calculate correlation and enrichment
+    # Step 2: Calculate hmC and ES
     binned_files = [
-        os.path.join(bin_output_dir, os.path.basename(f).replace('.bam', f'.binSize{args.bin_size}.bedgraph')
-                                   .replace('.sam', f'.binSize{args.bin_size}.bedgraph')
-                                   .replace('.bedgraph', f'.binSize{args.bin_size}.bedgraph')
-                                   .replace('.bigwig', f'.binSize{args.bin_size}.bedgraph')
-                                   .replace('.bw', f'.binSize{args.bin_size}.bedgraph'))
+        os.path.join(
+            bin_output_dir,
+            f"{os.path.splitext(os.path.basename(f))[0]}"
+            f".binSize{args.bin_size}.bedgraph"
+        )
         for f in args.input_files
     ]
 
@@ -48,18 +49,21 @@ def run_pipeline(args):
 
     calc_output_dir = os.path.join(args.output_dir, 'correlation_enrichment')
     calc_args = argparse.Namespace(
-        track1=binned_files[0],
-        track2=binned_files[1],
-        output_dir=calc_output_dir,
-        method=args.method,
-        FDR=args.FDR, 
-        percentile=args.percentile,
-        binNum_window=args.binNum_window,  ### <<< CHANGED
-        step=args.step,
-        binNum_peak=args.binNum_peak,      ### <<< CHANGED
-        FC_thresh=args.FC_thresh,          ### <<< CHANGED
-        chroms=chroms,
-        chrom_sizes=args.chrom_sizes  # **Pass chrom_sizes to calc.py**
+        track1           = binned_files[0],
+        track2           = binned_files[1],
+        output_dir       = calc_output_dir,
+        method           = args.method,
+        FDR              = args.FDR,
+        percentile       = args.percentile,
+        percentile_mode  = args.percentile_mode,            # --- CHANGED (new flag)
+        binNum_window    = args.binNum_window,
+        step             = args.step,
+        binNum_peak      = args.binNum_peak,
+        FC_thresh        = args.FC_thresh,
+        norm_method      = args.norm_method,                # --- CHANGED (new flag)
+        chroms           = chroms,
+        chrom_sizes      = args.chrom_sizes,
+        threads          = args.threads                     # --- CHANGED ---
     )
     calc_corr_main(calc_args)
 

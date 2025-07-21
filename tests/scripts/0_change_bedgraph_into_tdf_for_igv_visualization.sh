@@ -2,12 +2,12 @@
 # conda activate tools_igvtools
 # conda activate -c bioconda -c conda-forge igvtools=2.16.2
 
-genome="hg19"
-src_dir="../test_data_chr20"
+# genome="hg19"
+# src_dir="../test_data_chr20"
 
-# genome="mm10"
-# src_dir="../test_ChIPseq_data_from_NatureGenetics2011"
-# src_dir="../test_ChIP-seq_data_from_NG2011_using_pipeline/significant_regions"
+genome="mm9"
+# src_dir="../result_ChIPseq_data_from_NatureGenetics2011"
+src_dir="../result_test_CTCF_ChIP-seq_data_from_Cell2017_using_pipeline/correlation_enrichment"
 
 
 for bg in "$src_dir"/*.bedgraph; do

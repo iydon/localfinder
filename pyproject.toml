@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "localfinder"
-version = "0.1.19"
-description = "A tool calculating weighted local correlation and enrichment significance of two tracks and finding significantly different genomic regions."
+version = "0.1.20"
+description = "localfinder – calculate weighted local correlation (hmC) and enrichment significance (ES) between two genomic tracks, optionally discover significantly different regions, and visualise results"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Pengfei Yin", email = "12133074@mail.sustech.edu.cn" }]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 # Run-time dependencies (same list you had in install_requires)
 dependencies = [
