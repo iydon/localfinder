@@ -50,7 +50,7 @@ def main():
         formatter_class=RawDescriptionHelpFormatter 
     )
     parser_bin.add_argument('--input_files', nargs='+', required=True,
-                            help='Input files in BigWig/BedGraph/BAM/SAM format.')
+                            help='Input files in BigWig/BedGraph/BAM format.')
     parser_bin.add_argument('--output_dir', required=True,
                             help='Output directory for binned data.')
     parser_bin.add_argument('--bin_size', type=int, default=200,
@@ -102,8 +102,8 @@ def main():
     # NEW: FC threshold base for the log-fold enrichment
     parser_calc.add_argument('--FC_thresh', type=float, default=1.5,
                             help='Fold-change threshold used as log base in enrichment (default: 1.5). When FC_thresh=1.5, the null hypothesis is that log1.5(track1/track2)=0, which is quite similar to the FC_thresh in the vocalno plot. Wald, a statistical value following a normal distribution here, euqal to log1.5(track1/track2) / SE can be used to calculate the p value, whose -log10 represents for ES here.')
-    parser_calc.add_argument("--norm_method", choices=["scale", "cpm"], default="scale",
-                            help="Normalisation: scale (match totals) or cpm (counts per million).")
+    parser_calc.add_argument("--norm_method", choices=["scale", "cpm", "rpkm"], default="rpkm",
+                            help="Normalisation: scale (match totals) or cpm (counts per million) or rpkm (reads per kilobase per million reads).")
     parser_calc.add_argument('--chrom_sizes', type=str, required=True,
                              help='Path to the chromosome sizes file.')
     parser_calc.add_argument('--chroms', nargs='+', default=['all'],
@@ -170,7 +170,7 @@ def main():
         description='Run localfinder sequentially.',
         epilog=textwrap.dedent('''\
             Usage Example 1:
-                localfinder pipeline --input_files track1.bedgraph track2.bedgraph --output_dir ./results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --FDR --binNum_window 11 --binNum_peak 3 --step 1 --percentile 90 --percentile_mode all --FC_thresh 1.5 --norm_method cpm --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2 --threads 4
+                localfinder pipeline --input_files track1.bedgraph track2.bedgraph --output_dir ./results --chrom_sizes hg19.chrom.sizes --bin_size 200 --method locP_and_ES --FDR --binNum_window 11 --binNum_peak 3 --step 1 --percentile 90 --percentile_mode all --FC_thresh 1.5 --norm_method rpkm --p_thresh 0.05 --binNum_thresh 2 --chroms chr1 chr2 --threads 4
 
             Usage Example 2:
                 localfinder pipeline --input_files track1.bigwig track2.bigwig --output_dir ./results --chrom_sizes hg19.chrom.sizes --binNum_peak 3 --percentile 95 --binNum_thresh 2
@@ -204,8 +204,8 @@ def main():
                              help='Use all bins or only non-zero bins for percentile (default: all). When choosing "all" mode, we will choose larger percentile value than that of "nonzero" mode to get the same floor.')
     parser_pipe.add_argument("--FC_thresh", type=float, default=1.5,
                              help="Fold-change threshold used as log base in enrichment (default: 1.5). When FC_thresh=1.5, the null hypothesis is that log1.5(track1/track2)=0, which is quite similar to the FC_thresh in the volcano plot. Wald, a statistical value following a normal distribution here, equal to log1.5(track1/track2) / SE can be used to calculate the p value, whose -log10 represents for ES here.")
-    parser_pipe.add_argument('--norm_method', choices=['scale', 'cpm'],default='scale',
-                             help='Normalisation: scale (match totals) or cpm (counts per million).')
+    parser_pipe.add_argument('--norm_method', choices=['scale', 'cpm', 'rpkm'],default='rpkm',
+                             help='Normalisation: scale (match totals) or cpm (counts per million) or rpkm (reads per kilobase per million reads).')
     # findreg thresholds forwarded
     parser_pipe.add_argument("--p_thresh", type=float, default=0.05,
                              help="P-value threshold for merging significant bins into regions (default: 0.05)")

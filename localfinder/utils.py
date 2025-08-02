@@ -88,6 +88,30 @@ def process_and_bin_file(input_file, output_file, bin_size, chrom_sizes, chrom):
                 if os.path.getsize(temp_bedgraph) == 0:
                     print(f"No data for chromosome {chrom} in {input_file}")
                     sys.exit(1)
+            elif input_format == "bam":  
+                with open(temp_bedgraph, "w") as out_bg:
+                    # 1) stream just this chromosome
+                    p_view = subprocess.Popen(
+                        ["samtools", "view", "-b", input_file, chrom],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE       # keep stderr in case of error
+                    )
+                    # 2) genomecov on the stream
+                    p_cov  = subprocess.run(
+                        ["bedtools", "genomecov", "-bg", "-ibam", "-"],
+                        stdin=p_view.stdout, stdout=out_bg, stderr=subprocess.PIPE
+                    )
+                    p_view.stdout.close()   # allow p_view to receive SIGPIPE if genomecov fails
+                    p_view.wait()
+
+                    if p_view.returncode != 0:
+                        raise RuntimeError(
+                            f"samtools view failed ({p_view.returncode}):\n{p_view.stderr.read().decode()}"
+                        )
+                    if p_cov.returncode != 0:
+                        raise RuntimeError(
+                            f"bedtools genomecov failed ({p_cov.returncode}):\n{p_cov.stderr.decode()}"
+                        )
             else:
                 print(f"Unsupported format: {input_format}")
                 sys.exit(1)
@@ -112,13 +136,11 @@ def detect_format(filename):
     - filename (str): The name or path of the file.
 
     Returns:
-    - format (str): The inferred format ('bam', 'sam', 'bedgraph', 'bigwig'), or None if unknown.
+    - format (str): The inferred format ('bam', 'bedgraph', 'bigwig'), or None if unknown.
     """
     extension = os.path.splitext(filename)[1].lower()
     if extension == '.bam':
         return 'bam'
-    elif extension == '.sam':
-        return 'sam'
     elif extension in ['.bedgraph', '.bdg']:
         return 'bedgraph'
     elif extension in ['.bigwig', '.bw']:
@@ -198,7 +220,7 @@ def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chrom):
 
 def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         bin_number_of_window=11, step=1, percentile=5, percentile_mode='all', FC_thresh=1.5,
-        bin_number_of_peak=11, norm_method='scale', corr_method='pearson', FDR=False,
+        bin_number_of_peak=11, norm_method='rpkm', corr_method='pearson', FDR=False,
         output_dir='output', chrom=None):
 
     """
@@ -237,6 +259,15 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         if cov2 > 0:
             df[column2] = df[column2] * 1e6 / cov2
         print(f"Converted {column1} and {column2} to CPM")
+
+    elif norm_method == 'rpkm':                               ### <<< NEW BLOCK
+
+        bin_lengths_kb = (df['end'] - df['start']) / 1_000.0
+        if cov1 > 0:
+            df[column1] = df[column1] / bin_lengths_kb * 1e6 / cov1
+        if cov2 > 0:
+            df[column2] = df[column2] / bin_lengths_kb * 1e6 / cov2
+        print(f"Converted {column1} and {column2} to RPKM")
     else:
         raise ValueError(f"Unknown norm_method: {norm_method}")
 
@@ -290,7 +321,7 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
 
     W = 2 * ((bin_number_of_window - 1) // 2) + 1   # full window length
     P = 2 * ((bin_number_of_peak   - 1) // 2) + 1   # peak window length
-    EPS = 1e-9
+
 
     # Convert to NumPy arrays once
     x  = df_raw[column1].to_numpy(float)
@@ -392,8 +423,9 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     Wald = logFC[idx] / SE
     p    = 2 * (1 - norm.cdf(np.abs(Wald)))
     if FDR:                                         # ── new branch ──
-        q  = multipletests(p, alpha=0.05, method='fdr_bh')[1]
-        lP = -np.log10(np.where(q == 0, np.nan, q))    # log-q
+        # q  = multipletests(p, alpha=0.05, method='fdr_bh')[1]
+        # lP = -np.log10(np.where(q == 0, np.nan, q))    # log-q
+        lP = -np.log10(np.where(p == 0, np.nan, p))    # log-p
     else:
         lP = -np.log10(np.where(p == 0, np.nan, p))    # log-p
 
@@ -418,6 +450,15 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     print("step3: write track_hmC, track_ES")
     df_final['signed_log_Wald_pValue'] = (np.sign(df_final['logFC']) * df_final['log_Wald_pValue'])
     df_final['hmC']   = df_final['m_corr'] * df_final['hmw']
+    # # --- NEW: log10+min-max scale hmC into [0,1] while preserving order ---
+    # log_hmC      = np.log10(df_final['hmC'] + 1)       
+    # max_log_hmC  = log_hmC.max()                        
+    # df_final['hmC'] = log_hmC / max_log_hmC             
+
+    # --- NEW: linear scale to [0,1] using the 99th percentile ---
+    p999 = df_final['hmC'].quantile(0.999)                  
+    # clip the top 1% to p99, then divide so that p99 → 1
+    df_final['hmC'] = df_final['hmC'].clip(upper=p999) / p999  
 
     df_final[['chr', 'start', 'end', 'hmC']].to_csv(out_hmC,sep='\t', header=False, index=False)
     df_final[['chr', 'start', 'end', 'signed_log_Wald_pValue']].to_csv(out_ES,sep='\t', header=False, index=False)

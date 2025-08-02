@@ -17,8 +17,8 @@ bin_dir="${result_dir}/bin_tracks"
 mkdir -p ${bin_dir}
 localfinder bin --input_files ${track_1} ${track_2} --output_dir ${bin_dir} --bin_size 200 --chrom_sizes ${chrom_size} --chroms chr1 chr2
 
-
 correlation_enrichment_dir="${result_dir}/correlation_enrichment"
+# correlation_enrichment_dir="${result_dir}/correlation_enrichment"
 mkdir -p ${correlation_enrichment_dir}
 base1=$(basename "$track_1" .bw)
 bin_track_1="${result_dir}/bin_tracks/${base1}.binSize200.bedgraph"
@@ -27,7 +27,7 @@ base2=$(basename "$track_2" .bw)
 bin_track_2="${result_dir}/bin_tracks/${base2}.binSize200.bedgraph"
 # echo ${bin_track_2}
 localfinder calc --track1 ${bin_track_1} --track2 ${bin_track_2} --output_dir ${correlation_enrichment_dir} \
---binNum_peak 3 --percentile 99.4 --threads 4 --norm_method scale --chrom_sizes ${chrom_size} \
+--binNum_peak 3 --percentile 99.4 --threads 4 --norm_method rpkm --FDR --chrom_sizes ${chrom_size} \
 --chroms chr1 chr2
 
 significant_regions_dir="${result_dir}/significant_regions"

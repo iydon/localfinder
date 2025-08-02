@@ -59,7 +59,7 @@ def main(args):
     step                  = args.step
     chroms                = args.chroms
     chrom_sizes           = args.chrom_sizes
-    norm_method           = getattr(args, 'norm_method', 'scale')     # --- NEW ---
+    norm_method           = getattr(args, 'norm_method', 'rpkm')     # --- NEW ---
     n_threads             = getattr(args, 'threads', 1)            # ← NEW
 
     os.makedirs(output_dir, exist_ok=True)

@@ -24,5 +24,5 @@ localfinder pipeline \
     --binNum_window 11 --binNum_peak 3 --step 1 \
     --percentile 99.4 --percentile_mode all --FC_thresh 1.5 \
     --p_thresh 0.05 --binNum_thresh 2 \
-    --threads 4 --norm_method scale \
+    --threads 4 --norm_method rpkm \
     --chroms chr1 chr2
