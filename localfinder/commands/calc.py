@@ -23,6 +23,7 @@ def _calc_one_chrom(
     norm_method,
     corr_method,
     FDR,
+    hmC_scale_pct,
     output_dir,
 ):
     """Run locCor_and_ES for a single chromosome and return its two file paths."""
@@ -38,6 +39,7 @@ def _calc_one_chrom(
         norm_method=norm_method,
         corr_method=corr_method,
         FDR=FDR,
+        hmC_scale_pct=hmC_scale_pct,
         output_dir=output_dir,
         chrom=chrom,
     )
@@ -59,6 +61,7 @@ def main(args):
     step                  = args.step
     chroms                = args.chroms
     chrom_sizes           = args.chrom_sizes
+    hmC_scale_pct         = getattr(args, 'hmC_scale_pct', 0.9995) 
     norm_method           = getattr(args, 'norm_method', 'rpkm')     # --- NEW ---
     n_threads             = getattr(args, 'threads', 1)            # ← NEW
 
@@ -110,6 +113,7 @@ def main(args):
         corr_method=corr_method,
         FDR=FDR,
         output_dir=output_dir,
+        hmC_scale_pct=hmC_scale_pct,
     )
 
 

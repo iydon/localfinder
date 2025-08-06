@@ -61,6 +61,7 @@ def run_pipeline(args):
         binNum_peak      = args.binNum_peak,
         FC_thresh        = args.FC_thresh,
         norm_method      = args.norm_method,                # --- CHANGED (new flag)
+        hmC_scale_pct    = args.hmC_scale_pct,
         chroms           = chroms,
         chrom_sizes      = args.chrom_sizes,
         threads          = args.threads                     # --- CHANGED ---

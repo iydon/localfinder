@@ -220,7 +220,7 @@ def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chrom):
 
 def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         bin_number_of_window=11, step=1, percentile=5, percentile_mode='all', FC_thresh=1.5,
-        bin_number_of_peak=11, norm_method='rpkm', corr_method='pearson', FDR=False,
+        bin_number_of_peak=11, norm_method='rpkm', corr_method='pearson', FDR=False, hmC_scale_pct=0.9995,
         output_dir='output', chrom=None):
 
     """
@@ -235,7 +235,8 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     print(f"parameters: percentile={percentile}, FC_thresh={FC_thresh}, "
           f"bin_number_of_window={bin_number_of_window}, "
           f"bin_number_of_peak={bin_number_of_peak}, "
-          f"FDR={'ON' if FDR else 'OFF'}")
+          f"FDR={'ON' if FDR else 'OFF'}",
+          f"norm_method={norm_method}, hmC_scale_pct={hmC_scale_pct}")
 
     EPS = 1e-9
     os.makedirs(output_dir, exist_ok=True)
@@ -456,9 +457,9 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     # df_final['hmC'] = log_hmC / max_log_hmC             
 
     # --- NEW: linear scale to [0,1] using the 99th percentile ---
-    p999 = df_final['hmC'].quantile(0.999)                  
+    p_thr = df_final['hmC'].quantile(hmC_scale_pct)                  
     # clip the top 1% to p99, then divide so that p99 → 1
-    df_final['hmC'] = df_final['hmC'].clip(upper=p999) / p999  
+    df_final['hmC'] = df_final['hmC'].clip(upper=p_thr) / p_thr  
 
     df_final[['chr', 'start', 'end', 'hmC']].to_csv(out_hmC,sep='\t', header=False, index=False)
     df_final[['chr', 'start', 'end', 'signed_log_Wald_pValue']].to_csv(out_ES,sep='\t', header=False, index=False)
