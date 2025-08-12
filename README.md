@@ -1,6 +1,6 @@
 # localfinder
 
-localfinder – calculate weighted local correlation (hmC) and enrichment significance (ES) between two genomic tracks, optionally discover significantly different regions, and visualise results. 
+localfinder – calculate weighted local correlation (HMC) and enrichment significance (ES) between two genomic tracks, optionally discover significantly different regions, and visualize results. 
 
 ## Installation Requirements
 

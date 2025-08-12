@@ -22,7 +22,7 @@ def run_pipeline(args):
     )
     bin_tracks_main(bin_args)
 
-    # Step 2: Calculate hmC and ES
+    # Step 2: Calculate HMC and ES
     binned_files = [
         os.path.join(
             bin_output_dir,
@@ -61,7 +61,7 @@ def run_pipeline(args):
         binNum_peak      = args.binNum_peak,
         FC_thresh        = args.FC_thresh,
         norm_method      = args.norm_method,                # --- CHANGED (new flag)
-        hmC_scale_pct    = args.hmC_scale_pct,
+        HMC_scale_pct    = args.HMC_scale_pct,
         chroms           = chroms,
         chrom_sizes      = args.chrom_sizes,
         threads          = args.threads                     # --- CHANGED ---
@@ -72,10 +72,11 @@ def run_pipeline(args):
     find_output_dir = os.path.join(args.output_dir, "significant_regions")
     find_args = argparse.Namespace(
         track_E   = os.path.join(calc_output_dir, "track_ES.bedgraph"),   ### FIX
-        track_C   = os.path.join(calc_output_dir, "track_hmC.bedgraph"), ### FIX
+        track_C   = os.path.join(calc_output_dir, "track_HMC.bedgraph"), ### FIX
         output_dir      = find_output_dir,
         p_thresh        = args.p_thresh,        ### FIX
         binNum_thresh   = args.binNum_thresh,   ### FIX
+        max_gap_bins   = args.max_gap_bins, 
         chroms          = chroms,
         chrom_sizes     = args.chrom_sizes,
     )

@@ -19,7 +19,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="localfinder",
         description=(
-            "localfinder – calculate weighted local correlation (hmC) and enrichment "
+            "localfinder – calculate weighted local correlation (HMC) and enrichment "
             "significance (ES) between two genomic tracks, optionally discover "
             "significantly different regions, and visualise results. "
             "GitHub: https://github.com/astudentfromsustech/localfinder"
@@ -66,7 +66,7 @@ def main():
     # Subcommand: calc (alias: calculate_localCorrelation_and_enrichmentSignificance)
     parser_calc = subparsers.add_parser(
         'calc',
-        help='Compute hmC & ES tracks of two binned BedGraphs',
+        help='Compute HMC & ES tracks of two binned BedGraphs',
         description='Calculate weighted local correlation and enrichment significance between two BedGraph tracks.',
         epilog=textwrap.dedent('''\
             Usage Example 1:
@@ -104,8 +104,8 @@ def main():
                             help='Fold-change threshold used as log base in enrichment (default: 1.5). When FC_thresh=1.5, the null hypothesis is that log1.5(track1/track2)=0, which is quite similar to the FC_thresh in the vocalno plot. Wald, a statistical value following a normal distribution here, euqal to log1.5(track1/track2) / SE can be used to calculate the p value, whose -log10 represents for ES here.')
     parser_calc.add_argument("--norm_method", choices=["scale", "cpm", "rpkm"], default="rpkm",
                             help="Normalisation: scale (match totals) or cpm (counts per million) or rpkm (reads per kilobase per million reads).")
-    parser_calc.add_argument("--hmC_scale_pct", type=float, default=0.9995,
-                             help="Quantile used to linearly rescale hmC into [0,1] clip at this percentile then divide; default: 0.9995, i.e. top 0.05 percent clipped).")
+    parser_calc.add_argument("--HMC_scale_pct", type=float, default=0.9995,
+                             help="Quantile used to linearly rescale HMC into [0,1] clip at this percentile then divide; default: 0.9995, i.e. top 0.05 percent clipped).")
     parser_calc.add_argument('--chrom_sizes', type=str, required=True,
                              help='Path to the chromosome sizes file.')
     parser_calc.add_argument('--chroms', nargs='+', default=['all'],
@@ -117,24 +117,26 @@ def main():
     # Subcommand: findreg (alias: find_significantly_different_regions)
     parser_find = subparsers.add_parser(
         "findreg",
-        help="Merge significant bins into regions and filter by ES & hmC.",
-        description="Merge consecutive significant bins into regions. And find significantly different regions from ES & hmwC tracks.",
+        help="Merge significant bins into regions and filter by ES & HMC.",
+        description="Merge consecutive significant bins into regions. And find significantly different regions from ES & HMC tracks.",
         epilog=textwrap.dedent("""\
             Example 1:
-              localfinder findreg --track_E track_ES.bedgraph --track_C track_hmwC.bedgraph --output_dir ./findreg_out --p_thresh 0.05 --binNum_thresh 2 --chrom_sizes hg19.chrom.sizes --chroms chr1 chr2
+              localfinder findreg --track_E track_ES.bedgraph --track_C track_HMC.bedgraph --output_dir ./findreg_out --p_thresh 0.05 --binNum_thresh 2 --chrom_sizes hg19.chrom.sizes --chroms chr1 chr2
             
             Example 2:
-              localfinder findreg --track_E track_ES.bedgraph --track_C track_hmwC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes
+              localfinder findreg --track_E track_ES.bedgraph --track_C track_HMC.bedgraph --output_dir ./findreg_out --chrom_sizes hg19.chrom.sizes
         """),
         formatter_class=RawDescriptionHelpFormatter,
     )
     parser_find.add_argument("--track_E", required=True, help="track_ES.bedgraph")
-    parser_find.add_argument("--track_C", required=True, help="track_hmwC.bedgraph")
+    parser_find.add_argument("--track_C", required=True, help="track_HMC.bedgraph")
     parser_find.add_argument("--output_dir", required=True)
     parser_find.add_argument("--p_thresh", type=float, default=0.05,   
                              help="P-value threshold (default: 0.05)")
     parser_find.add_argument("--binNum_thresh", type=int, default=2,   
                              help="Min consecutive significant bins per region (default: 2)")
+    parser_find.add_argument("--max_gap_bins", type=int, default=0,          ### <<< NEW
+                             help="Allow merging two significant runs on the same chromosome if the empty gap between them is ≤ this number of bins (default: 0).")
     parser_find.add_argument("--chroms", nargs="+", default=["all"])
     parser_find.add_argument("--chrom_sizes", required=True)
     parser_find.set_defaults(func=find_regions_main)
@@ -208,13 +210,15 @@ def main():
                              help="Fold-change threshold used as log base in enrichment (default: 1.5). When FC_thresh=1.5, the null hypothesis is that log1.5(track1/track2)=0, which is quite similar to the FC_thresh in the volcano plot. Wald, a statistical value following a normal distribution here, equal to log1.5(track1/track2) / SE can be used to calculate the p value, whose -log10 represents for ES here.")
     parser_pipe.add_argument('--norm_method', choices=['scale', 'cpm', 'rpkm'],default='rpkm',
                              help='Normalisation: scale (match totals) or cpm (counts per million) or rpkm (reads per kilobase per million reads).')
-    parser_pipe.add_argument("--hmC_scale_pct", type=float, default=0.9995,
-                             help="Quantile used to linearly rescale hmC into [0,1] clip at this percentile then divide; default: 0.9995, i.e. top 0.05 percent clipped).")
+    parser_pipe.add_argument("--HMC_scale_pct", type=float, default=0.9995,
+                             help="Quantile used to linearly rescale HMC into [0,1] clip at this percentile then divide; default: 0.9995, i.e. top 0.05 percent clipped).")
     # findreg thresholds forwarded
     parser_pipe.add_argument("--p_thresh", type=float, default=0.05,
                              help="P-value threshold for merging significant bins into regions (default: 0.05)")
     parser_pipe.add_argument("--binNum_thresh", type=int, default=2,
                              help="Min consecutive significant bins per region")
+    parser_pipe.add_argument("--max_gap_bins", type=int, default=0,          ### <<< NEW
+                             help="Allow merging two significant runs on the same chromosome if the empty gap between them is ≤ this number of bins (default: 0).")
     parser_pipe.add_argument('--chroms', nargs='+', default=['all'],
                              help='Chromosomes to process (e.g., chr1 chr2). Defaults to "all".')
     parser_pipe.add_argument('--threads', '-t', type=int, default=1,

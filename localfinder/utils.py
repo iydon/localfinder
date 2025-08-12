@@ -220,12 +220,12 @@ def bin_bedgraph(input_bedgraph, output_bedgraph, bin_size, chrom_sizes, chrom):
 
 def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
         bin_number_of_window=11, step=1, percentile=5, percentile_mode='all', FC_thresh=1.5,
-        bin_number_of_peak=11, norm_method='rpkm', corr_method='pearson', FDR=False, hmC_scale_pct=0.9995,
+        bin_number_of_peak=11, norm_method='rpkm', corr_method='pearson', FDR=False, HMC_scale_pct=0.9995,
         output_dir='output', chrom=None):
 
     """
     Calculate weighted local correlation and enrichment significance.
-    Writes two bedgraph files: track_hmC.bedgraph, track_ES.bedgraph.
+    Writes two bedgraph files: track_HMC.bedgraph, track_ES.bedgraph.
     """
     if chrom is None:                                   
         raise ValueError("Argument 'chrom' (e.g. 'chr1') must be provided")
@@ -236,7 +236,7 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
           f"bin_number_of_window={bin_number_of_window}, "
           f"bin_number_of_peak={bin_number_of_peak}, "
           f"FDR={'ON' if FDR else 'OFF'}",
-          f"norm_method={norm_method}, hmC_scale_pct={hmC_scale_pct}")
+          f"norm_method={norm_method}, HMC_scale_pct={HMC_scale_pct}")
 
     EPS = 1e-9
     os.makedirs(output_dir, exist_ok=True)
@@ -275,7 +275,7 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
 
     # ---------- output paths -------------------------------------------
     out_ES   = os.path.join(output_dir, f'track_ES.{chrom}.bedgraph')
-    out_hmC = os.path.join(output_dir, f'track_hmC.{chrom}.bedgraph')
+    out_HMC = os.path.join(output_dir, f'track_HMC.{chrom}.bedgraph')
 
     half_w = (bin_number_of_window - 1) // 2
     half_p = (bin_number_of_peak   - 1) // 2
@@ -448,23 +448,23 @@ def locCor_and_ES(df, column1='readNum_1', column2='readNum_2',
     df_final = dfc 
 
     # ---------- 3  stack & write  --------------------------------------
-    print("step3: write track_hmC, track_ES")
+    print("step3: write track_HMC, track_ES")
     df_final['signed_log_Wald_pValue'] = (np.sign(df_final['logFC']) * df_final['log_Wald_pValue'])
-    df_final['hmC']   = df_final['m_corr'] * df_final['hmw']
-    # # --- NEW: log10+min-max scale hmC into [0,1] while preserving order ---
-    # log_hmC      = np.log10(df_final['hmC'] + 1)       
-    # max_log_hmC  = log_hmC.max()                        
-    # df_final['hmC'] = log_hmC / max_log_hmC             
+    df_final['HMC']   = df_final['m_corr'] * df_final['hmw']
+    # # --- NEW: log10+min-max scale HMC into [0,1] while preserving order ---
+    # log_HMC      = np.log10(df_final['HMC'] + 1)       
+    # max_log_HMC  = log_HMC.max()                        
+    # df_final['HMC'] = log_HMC / max_log_HMC             
 
     # --- NEW: linear scale to [0,1] using the 99th percentile ---
-    p_thr = df_final['hmC'].quantile(hmC_scale_pct)                  
+    p_thr = df_final['HMC'].quantile(HMC_scale_pct)                  
     # clip the top 1% to p99, then divide so that p99 → 1
-    df_final['hmC'] = df_final['hmC'].clip(upper=p_thr) / p_thr  
+    df_final['HMC'] = df_final['HMC'].clip(upper=p_thr) / p_thr  
 
-    df_final[['chr', 'start', 'end', 'hmC']].to_csv(out_hmC,sep='\t', header=False, index=False)
+    df_final[['chr', 'start', 'end', 'HMC']].to_csv(out_HMC,sep='\t', header=False, index=False)
     df_final[['chr', 'start', 'end', 'signed_log_Wald_pValue']].to_csv(out_ES,sep='\t', header=False, index=False)
     
-    print(f"Saved outputs to {out_hmC} and {out_ES}")
+    print(f"Saved outputs to {out_HMC} and {out_ES}")
 
 
 
@@ -611,22 +611,29 @@ def get_plotly_default_colors(num_colors):
 
 def find_significantly_different_regions(
     track_ES_file: str,
-    track_hmC_file: str,
+    track_HMC_file: str,
     output_dir: str,
     p_thresh: float = 0.05,
     binNum_thresh: int = 2,
+    max_gap_bins: int = 0,  
     chroms=None,
     chrom_sizes=None
 ):
     """
-    1) Read track_ES.bedgraph and track_hmC.bedgraph  
-    2) Merge on chr/start/end  
-    3) Keep bins with abs(ES) >= -log10(p_thresh) AND same sign runs of length>=min_region  
-    4) Write those bins (chr, start, end, ES, hmC) to '<output_dir>/signif_bins.tsv'  
-    5) Merge adjacent bins into regions (same chr, end==next start), average hmC across region  
-       and sort descending by avg_hmC, write to '<output_dir>/signif_regions.tsv'  
-    6) Plot rank vs log(hmC+1) for those regions, save '<output_dir>/hmC_rank.png'  
+    1) Read track_ES.bedgraph and track_HMC.bedgraph
+    2) Merge on chr/start/end
+    3) Keep bins with abs(ES) >= -log10(p_thresh) AND same-sign runs of length >= binNum_thresh.
+       Then merge runs on the same chromosome if the empty gap between them is
+       <= max_gap_bins bins (default: 1). Gaps do not contribute HMC values.   ### <<< CHANGED
+    4) Write those bins (chr, start, end, ES, HMC) to '<output_dir>/pos_signif_bins.tsv'
+       and '<output_dir>/neg_signif_bins.tsv'
+    5) Merge adjacent/nearby bins into regions, average HMC across significant bins only,
+       sort descending by avg_HMC, and write to
+       '<output_dir>/signif_pos_regions.tsv' and '<output_dir>/signif_neg_regions.tsv'
+    6) Plot rank vs log(HMC+1) for those regions, save
+       '<output_dir>/HMC_rank_in_pos_regions.png' and '_neg_regions.png'
     """
+    max_gap_bins = max(0, int(max_gap_bins))
     os.makedirs(output_dir, exist_ok=True)
 
     # 1) read  
@@ -634,8 +641,8 @@ def find_significantly_different_regions(
                         names=['chr','start','end','ES'])
     print(df_es.shape)
     # print(df_es.head())
-    df_c  = pd.read_csv(track_hmC_file, sep='\t', header=None,
-                        names=['chr','start','end','hmC'])
+    df_c  = pd.read_csv(track_HMC_file, sep='\t', header=None,
+                        names=['chr','start','end','HMC'])
     print(df_c.shape)
     # print(df_c.head())
     # 2) merge  
@@ -645,7 +652,8 @@ def find_significantly_different_regions(
 
     # 3) filter by ES  
     thresh = -np.log10(p_thresh)
-    print(f'thresh: {thresh}')  
+    print(f'thresh: {thresh}')
+    # print(f'max_gap_binNum: {max_gap_binNum}')  
     # split positive and negative extremes
     df_pos = df[df['ES'] >=  thresh]
     df_neg = df[df['ES'] <= -thresh]
@@ -655,95 +663,145 @@ def find_significantly_different_regions(
     # print(df_neg.head(50))
 
     # helper to merge runs on same chromosome
-    def _merge_runs(df_bins):
+    def _merge_runs_allow_gaps(df_bins, max_gap_bins=max_gap_bins):  ### <<< NEW
         regs = []
         for chrom, grp in df_bins.groupby('chr'):
             grp = grp.sort_values('start')
+            # infer bin size per chromosome (robust to a few irregular bins)
+            if len(grp) == 0:
+                continue
+            bin_sizes = (grp['end'].values - grp['start'].values)
+            # fallback to 1 if something weird
+            bin_size = int(np.median(bin_sizes)) if len(bin_sizes) else 1
+            bin_size = max(bin_size, 1)
+
             curr = None
             for _, row in grp.iterrows():
-                if curr is None or row.start != curr['end']:
-                    # flush old
-                    if curr and curr['count'] >= binNum_thresh:
-                        regs.append(curr)
+                if curr is None:
                     curr = dict(chr=chrom,
-                                start=row.start,
-                                end=row.end,
-                                wvals=[row.hmC],
+                                start=int(row.start),
+                                end=int(row.end),
+                                wvals=[float(row.HMC)],
                                 count=1)
-                else:
-                    curr['end']   = row.end
-                    curr['wvals'].append(row.hmC)
+                    continue
+
+                gap_bp = int(row.start) - int(curr['end'])
+                # allow merge if contiguous (gap==0) or small gap in bins
+                if gap_bp >= 0 and gap_bp <= max_gap_bins * bin_size:  ### <<< NEW
+                    # extend region but do NOT add any HMC for the gap
+                    curr['end'] = int(row.end)
+                    curr['wvals'].append(float(row.HMC))
                     curr['count'] += 1
-            # last
+                else:
+                    # close previous run if long enough
+                    if curr['count'] >= binNum_thresh:
+                        regs.append(curr)
+                    # start a new run
+                    curr = dict(chr=chrom,
+                                start=int(row.start),
+                                end=int(row.end),
+                                wvals=[float(row.HMC)],
+                                count=1)
+            # flush last
             if curr and curr['count'] >= binNum_thresh:
                 regs.append(curr)
+
         # build DataFrame
+        if not regs:
+            return pd.DataFrame(columns=['chr','start','end','avg_HMC'])
         df_regs = pd.DataFrame(regs)
-        # if no runs passed the threshold, just return empty frame with the right columns
-        if df_regs.empty:
-            return pd.DataFrame(columns=['chr','start','end','avg_hmC'])
-        df_regs['avg_hmC'] = df_regs['wvals'].apply(np.mean)
-        return df_regs[['chr','start','end','avg_hmC']]
+        df_regs['avg_HMC'] = df_regs['wvals'].apply(np.mean)
+        return df_regs[['chr','start','end','avg_HMC']]
 
     # 4) write bins
     df_pos_sig = df_pos.sort_values(['chr','start'])
     pos_sig_n = df_pos_sig.shape[0]
     pos_bins_out = os.path.join(output_dir, 'pos_signif_bins.tsv')
-    df_pos_sig[['chr','start','end','ES','hmC']].to_csv(
+    df_pos_sig[['chr','start','end','ES','HMC']].to_csv(
         pos_bins_out, sep='\t', index=False
     )
     print(f"{pos_sig_n} pos ignificant bins written to {pos_bins_out}")
     df_neg_sig = df_neg.sort_values(['chr','start'])
     neg_sig_n = df_neg_sig.shape[0]
     neg_bins_out = os.path.join(output_dir, 'neg_signif_bins.tsv')
-    df_neg_sig[['chr','start','end', 'ES','hmC']].to_csv(
+    df_neg_sig[['chr','start','end', 'ES','HMC']].to_csv(
         neg_bins_out, sep='\t', index=False
     )
     print(f"{neg_sig_n} neg ignificant bins written to {neg_bins_out}")
 
     # 5) merge regions & write
-    df_pos_regs = _merge_runs(df_pos).sort_values('avg_hmC', ascending=False)
+    df_pos_regs = _merge_runs_allow_gaps(df_pos).sort_values('avg_HMC', ascending=False)
+    # df_pos_regs['avg_HMC'] = df_pos_regs['avg_HMC'].round(2)
+    df_pos_regs['avg_HMC'] = df_pos_regs['avg_HMC']
     pos_n = df_pos_regs.shape[0]
     print(pos_n)
     print(df_pos_regs.shape)
-    print(df_pos_regs)
+    # print(df_pos_regs)
 
     pos_regs_out = os.path.join(output_dir, 'signif_pos_regions.tsv')
     df_pos_regs.to_csv(pos_regs_out, sep='\t', index=False)
     print(f"{pos_n} merged pos regions written to {pos_regs_out}")
 
 
-    df_neg_regs = _merge_runs(df_neg).sort_values('avg_hmC', ascending=False)
+    df_neg_regs = _merge_runs_allow_gaps(df_neg).sort_values('avg_HMC', ascending=False)
+    # df_neg_regs['avg_HMC'] = df_neg_regs['avg_HMC'].round(2)
+    df_neg_regs['avg_HMC'] = df_neg_regs['avg_HMC']
     neg_n = df_neg_regs.shape[0]
     print(neg_n)
     print(df_neg_regs.shape)
-    print(df_neg_regs)
+    # print(df_neg_regs)
 
     neg_regs_out = os.path.join(output_dir, 'signif_neg_regions.tsv')
     df_neg_regs.to_csv(neg_regs_out, sep='\t', index=False)
     print(f"{neg_n} merged neg regions written to {neg_regs_out}")
 
+        # --- NEW: also save BED files (no header), sorted by chr/start/end ---
+    pos_bed_out = os.path.join(output_dir, 'signif_pos_regions.bed')
+    neg_bed_out = os.path.join(output_dir, 'signif_neg_regions.bed')
+
+    # ensure integer coordinates, then sort and save
+    if not df_pos_regs.empty:
+        # df_pos_bed = df_pos_regs[['chr','start','end','avg_HMC']].copy()
+        df_pos_bed = df_pos_regs[['chr','start','end']].copy()
+        df_pos_bed[['start','end']] = df_pos_bed[['start','end']].astype(int)
+        df_pos_bed = df_pos_bed.sort_values(['chr','start','end'])
+        df_pos_bed.to_csv(pos_bed_out, sep='\t', header=False, index=False)
+        print(f"BED written: {pos_bed_out}")
+
+    if not df_neg_regs.empty:
+        # df_neg_bed = df_neg_regs[['chr','start','end','avg_HMC']].copy()
+        df_neg_bed = df_neg_regs[['chr','start','end']].copy()
+        df_neg_bed[['start','end']] = df_neg_bed[['start','end']].astype(int)
+        df_neg_bed = df_neg_bed.sort_values(['chr','start','end'])
+        df_neg_bed.to_csv(neg_bed_out, sep='\t', header=False, index=False)
+        print(f"BED written: {neg_bed_out}")
+    # --- end NEW ---
+
     # 6) plot rank vs log(w+1)
     df_pos_regs['rank'] = np.arange(1, len(df_pos_regs)+1)
     plt.figure(figsize=(6,4))
-    plt.plot(df_pos_regs['rank'], np.log(df_pos_regs['avg_hmC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    # plt.plot(df_pos_regs['rank'], np.log(df_pos_regs['avg_HMC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    plt.plot(df_pos_regs['rank'], df_pos_regs['avg_HMC'], marker='.', linestyle='none',markersize=1, color='k')
     plt.xlabel('Region rank')
-    plt.ylabel('log(hmC+1)')
-    plt.title('Ranked region hmC')
+    # plt.ylabel('log(HMC+1)')
+    plt.ylabel('HMC')
+    plt.title('Ranked region HMC')
     plt.tight_layout()
-    fig_out = os.path.join(output_dir, 'hmC_rank_in_pos_regions.png')
+    fig_out = os.path.join(output_dir, 'HMC_rank_in_pos_regions.png')
     plt.savefig(fig_out, dpi=600)
     plt.close()
     print(f"Rank plot of pos regions saved to {fig_out}")
 
     df_neg_regs['rank'] = np.arange(1, len(df_neg_regs)+1)
     plt.figure(figsize=(6,4))
-    plt.plot(df_neg_regs['rank'], np.log(df_neg_regs['avg_hmC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    # plt.plot(df_neg_regs['rank'], np.log(df_neg_regs['avg_HMC']+1), marker='.', linestyle='none',markersize=1, color='k')
+    plt.plot(df_neg_regs['rank'], df_neg_regs['avg_HMC'], marker='.', linestyle='none',markersize=1, color='k')
     plt.xlabel('Region rank')
-    plt.ylabel('log(hmC+1)')
-    plt.title('Ranked region hmC')
+    # plt.ylabel('log(HMC+1)')
+    plt.ylabel('HMC')
+    plt.title('Ranked region HMC')
     plt.tight_layout()
-    fig_out = os.path.join(output_dir, 'hmC_rank_in_neg_regions.png')
+    fig_out = os.path.join(output_dir, 'HMC_rank_in_neg_regions.png')
     plt.savefig(fig_out, dpi=600)
     plt.close()
     print(f"Rank plot of neg regions saved to {fig_out}")

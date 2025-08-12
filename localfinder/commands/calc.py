@@ -23,7 +23,7 @@ def _calc_one_chrom(
     norm_method,
     corr_method,
     FDR,
-    hmC_scale_pct,
+    HMC_scale_pct,
     output_dir,
 ):
     """Run locCor_and_ES for a single chromosome and return its two file paths."""
@@ -39,13 +39,13 @@ def _calc_one_chrom(
         norm_method=norm_method,
         corr_method=corr_method,
         FDR=FDR,
-        hmC_scale_pct=hmC_scale_pct,
+        HMC_scale_pct=HMC_scale_pct,
         output_dir=output_dir,
         chrom=chrom,
     )
     es_path  = os.path.join(output_dir, f"track_ES.{chrom}.bedgraph")
-    hmc_path = os.path.join(output_dir, f"track_hmC.{chrom}.bedgraph")
-    return chrom, es_path, hmc_path
+    HMC_path = os.path.join(output_dir, f"track_HMC.{chrom}.bedgraph")
+    return chrom, es_path, HMC_path
 
 def main(args):
     track1_file           = args.track1
@@ -61,7 +61,7 @@ def main(args):
     step                  = args.step
     chroms                = args.chroms
     chrom_sizes           = args.chrom_sizes
-    hmC_scale_pct         = getattr(args, 'hmC_scale_pct', 0.9995) 
+    HMC_scale_pct         = getattr(args, 'HMC_scale_pct', 0.9995) 
     norm_method           = getattr(args, 'norm_method', 'rpkm')     # --- NEW ---
     n_threads             = getattr(args, 'threads', 1)            # ← NEW
 
@@ -113,7 +113,7 @@ def main(args):
         corr_method=corr_method,
         FDR=FDR,
         output_dir=output_dir,
-        hmC_scale_pct=hmC_scale_pct,
+        HMC_scale_pct=HMC_scale_pct,
     )
 
 
@@ -123,8 +123,8 @@ def main(args):
         for fut in as_completed(futures):
             chrom = futures[fut]
             try:
-                chrom_ret, es_path, hmc_path = fut.result()
-                produced[chrom_ret] = (es_path, hmc_path)           # --- NEW ---
+                chrom_ret, es_path, HMC_path = fut.result()
+                produced[chrom_ret] = (es_path, HMC_path)           # --- NEW ---
                 print(f"[DONE] {chrom_ret}")
             except Exception as e:
                 print(f"[ERROR] {chrom}: {e}"); raise
@@ -133,13 +133,13 @@ def main(args):
     #  concatenate per-chrom files → combined BedGraphs, then delete
     # ---------------------------------------------------------------
     combo_ES   = os.path.join(output_dir, "track_ES.bedgraph")
-    combo_hmC  = os.path.join(output_dir, "track_hmC.bedgraph")
+    combo_HMC  = os.path.join(output_dir, "track_HMC.bedgraph")
 
     print("[COMBINE] building combined BedGraphs")
-    with open(combo_ES, "wb") as es_out, open(combo_hmC, "wb") as hmc_out:
+    with open(combo_ES, "wb") as es_out, open(combo_HMC, "wb") as HMC_out:
         for chrom in chroms:                                     # preserve order
-            es_path, hmc_path = produced.get(chrom, (None, None))### <<< NEW guard
-            for src, dst in [(es_path, es_out), (hmc_path, hmc_out)]:
+            es_path, HMC_path = produced.get(chrom, (None, None))### <<< NEW guard
+            for src, dst in [(es_path, es_out), (HMC_path, HMC_out)]:
                 if src is None:                                  # --- NEW ---
                     # this chrom was skipped entirely (e.g. not in BigWig)
                     print(f"[SKIP] {chrom}: no {os.path.basename(dst.name)}")
@@ -151,4 +151,4 @@ def main(args):
                     shutil.copyfileobj(fh, dst)
                 os.remove(src)                                   # UNCHANGED
 
-    print(f"[COMBINE] saved {combo_ES} and {combo_hmC}")
+    print(f"[COMBINE] saved {combo_ES} and {combo_HMC}")

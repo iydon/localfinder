@@ -27,10 +27,10 @@ base2=$(basename "$track_2" .bw)
 bin_track_2="${result_dir}/bin_tracks/${base2}.binSize200.bedgraph"
 # echo ${bin_track_2}
 localfinder calc --track1 ${bin_track_1} --track2 ${bin_track_2} --output_dir ${correlation_enrichment_dir} \
---binNum_peak 3 --percentile 99.4 --threads 4 --norm_method rpkm --FDR --hmC_scale_pct 0.9995 --chrom_sizes ${chrom_size} \
+--binNum_peak 3 --percentile 99.4 --threads 4 --norm_method rpkm --FDR --HMC_scale_pct 0.9995 --chrom_sizes ${chrom_size} \
 --chroms chr1 chr2
 
 significant_regions_dir="${result_dir}/significant_regions"
 mkdir -p ${significant_regions_dir}
-localfinder findreg --track_E ${correlation_enrichment_dir}/track_ES.bedgraph --track_C ${correlation_enrichment_dir}/track_hmC.bedgraph \
+localfinder findreg --track_E ${correlation_enrichment_dir}/track_ES.bedgraph --track_C ${correlation_enrichment_dir}/track_HMC.bedgraph \
 --output_dir ${significant_regions_dir} --binNum_thresh 2 --chrom_size ${chrom_size} --chroms chr1 chr2
