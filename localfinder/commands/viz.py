@@ -1,6 +1,10 @@
 # File: commands/viz.py
 
-from localfinder.utils import visualize_tracks, get_plotly_default_colors
+from localfinder.utils import (
+    visualize_tracks,
+    get_plotly_default_colors,
+)
+
 
 def main(args):
     # Extract arguments
@@ -25,5 +29,5 @@ def main(args):
         output_file=output_file,
         method=method,
         region=region_tuple,
-        colors=colors
+        colors=colors,
     )
