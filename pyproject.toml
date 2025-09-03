@@ -8,14 +8,9 @@ authors = [{ name = "Pengfei Yin", email = "12133074@mail.sustech.edu.cn" }]
 requires-python = ">=3.9"
 
 dependencies = [
-  "argcomplete>=3.6.2",
-  "matplotlib>=3.8.4",
-  "numpy>=2.0.2",
-  "pandas>=2.3.1",
   "plotly>=6.3.0",
   "pygenometracks>=3.9",
   "scikit-learn>=1.6.1",
-  "scipy>=1.13.1",
   "statsmodels>=0.14.5",
 ]
 
@@ -39,6 +34,9 @@ packages = ["localfinder"]
 
 [dependency-groups]
 dev = ["ipython>=8.18.1"]
+
+[tool.mypy]
+disable_error_code = ["import-not-found"]
 
 [tool.ruff]
 line-length = 99

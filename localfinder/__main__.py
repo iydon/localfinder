@@ -1,6 +1,6 @@
 # File: __main__.py
 
-import argparse, sys, importlib.metadata, textwrap, argcomplete
+import argparse, sys, importlib.metadata, textwrap
 from argparse import RawDescriptionHelpFormatter
 
 from localfinder.commands.bin import main as bin_tracks_main
@@ -411,9 +411,6 @@ def main():
         help="Number of worker processes for bin & calc (default: 1)",
     )
     parser_pipe.set_defaults(func=run_pipeline)
-
-    # Enable auto-completion
-    argcomplete.autocomplete(parser)
 
     # Parse the arguments
     args = parser.parse_args()
