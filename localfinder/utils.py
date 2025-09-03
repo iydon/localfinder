@@ -1,12 +1,16 @@
-# File: utils.py
-import tempfile, shutil, subprocess, sys, os, numpy as np, pandas as pd
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
-from scipy.stats import pearsonr, norm, spearmanr
-from statsmodels.stats.multitest import multipletests
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from plotly.subplots import make_subplots
+from scipy.stats import norm
 
 
 def check_external_tools():
@@ -68,7 +72,6 @@ def process_and_bin_file(input_file, output_file, bin_size, chrom_sizes, chrom):
     chrom : str
         Chromosome to process (e.g. 'chr1').
     """
-    import shutil
 
     print(f"[START] {chrom}: processing {os.path.basename(input_file)}")
 
@@ -586,7 +589,7 @@ def visualize_with_pygenometracks(input_files, output_file, region=None, colors=
                 try:
                     track_color = colors[idx]
                 except (TypeError, IndexError):
-                    print(f"Error: Insufficient colors provided for the number of input files.")
+                    print("Error: Insufficient colors provided for the number of input files.")
                     track_color = get_plotly_default_colors(1)[0]  # Fallback to default color
 
                 config.write(f"color = {track_color}\n")
@@ -648,7 +651,7 @@ def visualize_with_plotly(input_files, output_file, region=None, colors=None):
         try:
             track_color = colors[idx]
         except (TypeError, IndexError):
-            print(f"Error: Insufficient colors provided for the number of input files.")
+            print("Error: Insufficient colors provided for the number of input files.")
             track_color = get_plotly_default_colors(1)[0]  # Fallback to default color
 
         fig.add_trace(

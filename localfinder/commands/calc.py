@@ -1,15 +1,13 @@
-# File: commands/calc.py
+import os
+import shutil
+import sys
 
-import os, sys, shutil, pandas as pd
-from concurrent.futures import (
-    ProcessPoolExecutor,
-    as_completed,
-)  # ← NEW
-from functools import partial  # ← NEW
-from localfinder.utils import (
-    locCor_and_ES,
-    get_chromosomes_from_chrom_sizes,
-)
+import pandas as pd
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
+
+from localfinder.utils import get_chromosomes_from_chrom_sizes, locCor_and_ES
 
 
 # ----------------------------------------------------------------------

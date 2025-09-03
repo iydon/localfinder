@@ -1,12 +1,12 @@
-# File: commands/bin.py
+import os
+import shutil
 
-import os, shutil, pandas as pd
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import partial
+
 from localfinder.utils import (
-    process_and_bin_file,
     check_external_tools,
     get_chromosomes_from_chrom_sizes,
+    process_and_bin_file,
 )
 
 

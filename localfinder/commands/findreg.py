@@ -1,8 +1,7 @@
-# File: commands/findreg.py
-
 import os
-from localfinder.utils import (  # util helpers
-    find_significantly_different_regions as util_find,  ### <<< CHANGED
+
+from localfinder.utils import (
+    find_significantly_different_regions as util_find,
     get_chromosomes_from_chrom_sizes,
 )
 

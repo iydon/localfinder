@@ -1,6 +1,8 @@
-# File: __main__.py
+import argparse
+import importlib.metadata
+import sys
+import textwrap
 
-import argparse, sys, importlib.metadata, textwrap
 from argparse import RawDescriptionHelpFormatter
 
 from localfinder.commands.bin import main as bin_tracks_main

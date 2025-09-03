@@ -1,9 +1,4 @@
-# File: commands/viz.py
-
-from localfinder.utils import (
-    visualize_tracks,
-    get_plotly_default_colors,
-)
+from localfinder.utils import get_plotly_default_colors, visualize_tracks
 
 
 def main(args):
